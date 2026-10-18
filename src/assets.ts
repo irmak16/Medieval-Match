@@ -1,0 +1,28 @@
+import { Assets, Texture } from 'pixi.js';
+
+const NAMES = [
+  'tile_red', 'tile_blue', 'tile_green', 'tile_yellow', 'tile_purple',
+  'pw_arrow', 'pw_barrel', 'pw_falcon', 'pw_orb',
+  'ob_crate1', 'ob_crate2', 'ob_crate3', 'ob_stone1', 'ob_stone2', 'ob_stone3', 'ob_chain', 'ob_vines',
+  'ui_frame', 'ui_panel', 'ui_popup', 'ui_btn_green', 'ui_btn_red', 'ui_btn_round', 'ui_star', 'ui_star_empty',
+  'ic_heart', 'ic_coin', 'ic_gear', 'ic_lock',
+  'fx_wood1', 'fx_wood2', 'fx_wood3', 'fx_wood4', 'fx_stone1', 'fx_stone2', 'fx_stone3', 'fx_stone4',
+  'fx_leaf1', 'fx_leaf2', 'fx_leaf3', 'fx_link1', 'fx_link2',
+  'p_glow', 'p_ring', 'p_sparkle', 'p_smoke', 'p_streak', 'p_star',
+];
+
+export async function loadAssets(onProgress?: (p: number) => void): Promise<void> {
+  const WEBP = new Set(['ui_frame', 'ui_popup', 'ui_panel', 'ui_btn_green', 'ui_btn_red']);
+  const list = NAMES.map((n) => ({ alias: n, src: `assets/${n}.${WEBP.has(n) ? 'webp' : 'png'}` }));
+  list.push({ alias: 'bg_game', src: 'assets/bg_game.jpg' });
+  Assets.addBundle('main', list);
+  await Assets.loadBundle('main', onProgress);
+}
+
+export function tex(name: string): Texture {
+  return Texture.from(name);
+}
+
+export const COLOR_TEX = ['tile_red', 'tile_blue', 'tile_green', 'tile_yellow', 'tile_purple'];
+// particle tint per tile color
+export const COLOR_TINT = [0xff4a3a, 0x3fa0ff, 0x4ee04a, 0xffd23a, 0xc06aff];
