@@ -15,11 +15,12 @@ def parse_levels(path='src/levels.ts'):
     src = open(path).read()
     body = src.split('const L: LevelDef[] = [')[1].split('\n];')[0]
     out = []
-    for diff, moves, colors, goals, grid in re.findall(
-            r"\{ (?:diff: '(\w+)', )?moves: (\d+), colors: (\d), goals: \[(.*?)\], grid: \[\s*(.*?)\] \}", body, re.S):
+    for diff, moves, colors, items, portals, goals, grid in re.findall(
+            r"\{ (?:diff: '(\w+)', )?moves: (\d+), colors: (\d), (?:items: (\d+), )?(?:portals: (\[\[.*?\]\]), )?goals: \[(.*?)\], grid: \[\s*(.*?)\] \}", body, re.S):
         rows = re.findall(r"'([^']*)'", grid)
         gl = [(t, int(c) if c else None) for t, c in re.findall(r"type: '(\w+)'(?:, count: (\d+))?", goals)]
-        out.append(dict(diff=diff or 'normal', moves=int(moves), colors=int(colors), goals=gl, grid=rows))
+        pt = [tuple(map(int, p)) for p in re.findall(r"\[(\d+), (\d+), (\d+), (\d+)\]", portals)] if portals else []
+        out.append(dict(diff=diff or 'normal', moves=int(moves), colors=int(colors), goals=gl, grid=rows, items=int(items or 0), portals=pt))
     return out
 
 
@@ -37,6 +38,8 @@ class Board:
                 if ch in '123': self.blk[r][c] = ['crate', int(ch)]
                 elif ch in '456': self.blk[r][c] = ['stone', int(ch) - 3]
                 elif ch == 'v': self.blk[r][c] = ['vines', 1]
+                elif ch == 'g': self.blk[r][c] = ['vines', 1, True]
+                elif ch == 'T': self.tile[r][c] = ('gold', -1)
                 elif ch in 'HVBFO':
                     self.tile[r][c] = ({'H': 'ah', 'V': 'av', 'B': 'barrel', 'F': 'falcon', 'O': 'orb'}[ch], -1)
                 elif ch in '.c':
@@ -45,9 +48,14 @@ class Board:
         self.goals = {}
         for t, n in lv['goals']:
             if n is None:
-                chars = {'crate': '123', 'stone': '456', 'vines': 'v', 'chain': 'c'}[t]
-                n = sum(ch in chars for row in lv['grid'] for ch in row)
+                chars = {'crate': '123', 'stone': '456', 'vines': 'vg', 'chain': 'c', 'gold': 'T'}[t]
+                n = sum(ch in chars for row in lv['grid'] for ch in row) + (lv.get('items', 0) if t == 'gold' else 0)
             self.goals[t] = n
+        self.items_left = lv.get('items', 0)
+        self.portals = lv.get('portals', [])
+        d = lv.get('diff', 'normal')
+        self.bias = -0.5 if d == 'superhard' else -0.35 if d == 'hard' else 0.12
+        self.vines_broken = False
         self.ensure_moves()
 
     # ------------------------------------------------------------------ helpers
@@ -78,6 +86,7 @@ class Board:
         b[1] -= 1
         if b[1] <= 0:
             self.blk[r][c] = None
+            if b[0] == 'vines': self.vines_broken = True
             self.collect(b[0])
 
     def hit(self, r, c, queue):
@@ -88,7 +97,7 @@ class Board:
         if self.chain[r][c]:
             self.chain[r][c] = False; self.collect('chain'); return
         t = self.tile[r][c]
-        if not t: return
+        if not t or t[0] == 'gold': return
         if t[0] != 'c':
             queue.append((r, c)); return
         self.tile[r][c] = None
@@ -96,7 +105,7 @@ class Board:
 
     def activate(self, r, c, queue, color=None):
         t = self.tile[r][c]
-        if not t or t[0] == 'c': return
+        if not t or t[0] in ('c', 'gold'): return
         self.tile[r][c] = None
         k = t[0]
         if k == 'ah': self.arrow(r, c, 'h', queue)
@@ -287,7 +296,18 @@ class Board:
                     k = r - 1
                     while k >= 0 and (not self.ok[k][c] or (not self.blk[k][c] and not self.tile[k][c])): k -= 1
                     if k < 0:
-                        self.tile[r][c] = ('c', self.rng.randrange(self.ncol)); changed = True
+                        p = self.portal_for(r, c)
+                        if p:
+                            fr, fc = p[0], p[1]
+                            if self.tile[fr][fc] and not self.chain[fr][fc]:
+                                self.tile[r][c] = self.tile[fr][fc]; self.tile[fr][fc] = None; changed = True
+                            continue
+                        if self.items_left > 0 and self.rng.random() < 0.25 and not any(t and t[0] == 'gold' for row in self.tile for t in row):
+                            self.items_left -= 1
+                            self.tile[r][c] = ('gold', -1)
+                        else:
+                            self.tile[r][c] = ('c', self.spawn_color(r, c))
+                        changed = True
                     elif self.tile[k][c] and not self.chain[k][c] and not self.blk[k][c]:
                         self.tile[r][c] = self.tile[k][c]; self.tile[k][c] = None; changed = True
             if changed: continue
@@ -304,10 +324,59 @@ class Board:
                     if changed: break
                 if changed: break
 
+    def portal_for(self, r, c):
+        for p in self.portals:
+            if p[3] == c and p[2] <= r:
+                if all(not self.ok[k][c] or (not self.blk[k][c] and not self.tile[k][c]) for k in range(p[2], r)):
+                    return p
+        return None
+
+    def spawn_color(self, r, c):
+        n = self.ncol
+        col = self.color_at
+        matching = set()
+        for k in range(n):
+            if (col(r + 1, c) == k and col(r + 2, c) == k) or (col(r, c - 1) == k and col(r, c - 2) == k) or \
+               (col(r, c + 1) == k and col(r, c + 2) == k) or (col(r, c - 1) == k and col(r, c + 1) == k):
+                matching.add(k)
+        roll = self.rng.random()
+        if self.bias > 0 and roll < self.bias and matching:
+            return self.rng.choice(sorted(matching))
+        if self.bias < 0 and roll < -self.bias:
+            safe = [k for k in range(n) if k not in matching]
+            if safe: return self.rng.choice(safe)
+        return self.rng.randrange(n)
+
+    def collect_items(self):
+        got = False
+        for r in range(self.H):
+            for c in range(self.W):
+                t = self.tile[r][c]
+                if t and t[0] == 'gold' and all(not self.ok[k][c] for k in range(r + 1, self.H)):
+                    self.tile[r][c] = None; self.collect('gold'); got = True
+        return got
+
+    def grow_vines(self):
+        growers = [(r, c) for r in range(self.H) for c in range(self.W) if self.blk[r][c] and len(self.blk[r][c]) > 2]
+        opts = []
+        for r, c in growers:
+            for dr, dc in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                rr, cc = r + dr, c + dc
+                if 0 <= rr < self.H and 0 <= cc < self.W and self.ok[rr][cc] and not self.blk[rr][cc] and not self.chain[rr][cc] \
+                        and self.tile[rr][cc] and self.tile[rr][cc][0] == 'c':
+                    opts.append((rr, cc))
+        if not opts: return
+        rr, cc = self.rng.choice(opts)
+        self.tile[rr][cc] = None
+        self.blk[rr][cc] = ['vines', 1, True]
+        if 'vines' in self.goals: self.goals['vines'] += 1
+
     def cascade(self, moved=()):
         steps = 0
         while True:
             self.settle()
+            if self.collect_items():
+                continue
             g = self.find_groups(moved)
             if not g: break
             self.resolve_groups(g)
@@ -322,13 +391,13 @@ class Board:
             for c in range(self.W):
                 t = self.tile[r][c]
                 if not t or self.chain[r][c]: continue
-                if t[0] != 'c': mv.append(('tap', (r, c)))
+                if t[0] not in ('c', 'gold'): mv.append(('tap', (r, c)))
                 for dr, dc in ((0, 1), (1, 0)):
                     r2, c2 = r + dr, c + dc
                     if r2 >= self.H or c2 >= self.W: continue
                     t2 = self.tile[r2][c2]
                     if not t2 or self.chain[r2][c2]: continue
-                    if t[0] != 'c' or t2[0] != 'c':
+                    if t[0] not in ('c', 'gold') or t2[0] not in ('c', 'gold'):
                         mv.append(('swap', (r, c), (r2, c2))); continue
                     self.tile[r][c], self.tile[r2][c2] = t2, t
                     ok = self.forms_match(r, c) or self.forms_match(r2, c2)
@@ -358,16 +427,17 @@ class Board:
         queue = []
         if m[0] == 'tap':
             self.activate(*m[1], queue); self.run_queue(queue)
-            if not shallow: self.cascade()
+            if not shallow: self.cascade(); self.after_move()
             return
         (r, c), (r2, c2) = m[1], m[2]
         a, b = self.tile[r][c], self.tile[r2][c2]
         self.tile[r][c], self.tile[r2][c2] = b, a
-        if a[0] != 'c' and b[0] != 'c':
+        pa, pb = a[0] not in ('c', 'gold'), b[0] not in ('c', 'gold')
+        if pa and pb:
             self.combo((r, c), (r2, c2), queue)
-        elif a[0] != 'c':
+        elif pa:
             self.activate(r2, c2, queue, color=b[1])
-        elif b[0] != 'c':
+        elif pb:
             self.activate(r, c, queue, color=a[1])
         self.run_queue(queue)
         if shallow:
@@ -375,6 +445,11 @@ class Board:
             if g: self.resolve_groups(g)
         else:
             self.cascade(moved=((r, c), (r2, c2)))
+            self.after_move()
+
+    def after_move(self):
+        if not self.vines_broken: self.grow_vines()
+        self.vines_broken = False
 
     def ensure_moves(self):
         for _ in range(50):
@@ -387,8 +462,19 @@ class Board:
     def progress(self):
         return sum(self.goals.values())
 
+    def gold_gaps(self):
+        """How far treasure items would drop (empty cells under them) — players aim below the treasure."""
+        n = 0
+        for r in range(self.H):
+            for c in range(self.W):
+                t = self.tile[r][c]
+                if t and t[0] == 'gold':
+                    for k in range(r + 1, self.H):
+                        if self.ok[k][c] and not self.tile[k][c] and not self.blk[k][c]: n += 1
+        return n
+
     def power_count(self):
-        return sum(1 for row in self.tile for t in row if t and t[0] != 'c')
+        return sum(1 for row in self.tile for t in row if t and t[0] not in ('c', 'gold'))
 
 
 def bot_move(b, rng, skill=1.0):
@@ -400,7 +486,7 @@ def bot_move(b, rng, skill=1.0):
         sim = copy.deepcopy(b)
         sim.rng = random.Random(rng.random())
         sim.play(m, shallow=True)  # a human sees the immediate result, not the future cascade
-        score = (base - sim.progress()) * 10 + sim.power_count() * 3 - (5 if m[0] == 'tap' and not any(sim.goals[g] < b.goals[g] for g in b.goals) else 0)
+        score = (base - sim.progress()) * 10 + sim.power_count() * 3 + sim.gold_gaps() * 12 - (5 if m[0] == 'tap' and not any(sim.goals[g] < b.goals[g] for g in b.goals) else 0)
         score += rng.random() * (1.0 + (1 - skill) * 30)
         scored.append((score, m))
     scored.sort(key=lambda s: -s[0])

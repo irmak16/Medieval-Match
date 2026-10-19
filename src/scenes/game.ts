@@ -1,17 +1,25 @@
 import { Container, Graphics, NineSliceSprite, Point, Sprite, Text } from 'pixi.js';
-import { Board, Kind } from '../game/board';
+import { Board, Kind, BoosterKind } from '../game/board';
+import { trackQuest, addRoadPoints, streakBonus } from '../liveops';
 import { getLevel, GoalType, LevelDef } from '../levels';
-import { tex } from '../assets';
+import { tex, hasTex, texOr } from '../assets';
 import { label, woodPanel, Button, iconButton, overlay } from '../ui';
 import { tween, Ease, wait, clearTimers, after, killTweens } from '../tween';
-import { sfx, updateMusic } from '../audio';
+import { sfx, updateMusic, setMusicIntensity } from '../audio';
 import { getSave, save, DEV, firstTime } from '../storage';
 import type { App } from '../main';
 
 const GOAL_TEX: Record<GoalType, string> = {
   red: 'tile_red', blue: 'tile_blue', green: 'tile_green', yellow: 'tile_yellow', purple: 'tile_purple',
-  crate: 'ob_crate1', stone: 'ob_stone1', chain: 'ob_chain', vines: 'ob_vines',
+  crate: 'ob_crate1', stone: 'ob_stone1', chain: 'ob_chain', vines: 'ob_vines', gold: 'ic_coin',
 };
+
+const BOOSTERS: { k: BoosterKind; tex: string; fallback: string; rot: number; name: string; price: number; hint: string }[] = [
+  { k: 'hammer', tex: 'bt_hammer', fallback: 'ob_stone2', rot: 0, name: 'Çekiç', price: 90, hint: 'Bir hücreye dokun: tek vuruşta kırar' },
+  { k: 'row', tex: 'bt_row', fallback: 'pw_arrow', rot: 0, name: 'Okçu', price: 120, hint: 'Bir hücreye dokun: o satırı temizler' },
+  { k: 'col', tex: 'bt_col', fallback: 'pw_arrow', rot: -Math.PI / 2, name: 'Mancınık', price: 120, hint: 'Bir hücreye dokun: o sütunu temizler' },
+  { k: 'shuffle', tex: 'bt_shuffle', fallback: 'pw_orb', rot: 0, name: 'Soytarı', price: 70, hint: '' },
+];
 
 export const DIFF_COLOR = { normal: 0x2c5f9e, hard: 0xa01e1e, superhard: 0x6a1fa0 } as const;
 
@@ -30,6 +38,14 @@ export class GameScene extends Container {
   private praiseCooldown = 0;
   private lastCascade = 0;
   private boardHolder = new Container();
+  private playfield = new Container();
+  private timeScale = 1;
+  private hitStop = 0;
+  private comboTxt!: Text;
+  private comboTimer = 0;
+  private lowMoves = false;
+  private boosterBtns: { k: BoosterKind; node: Container; badge: Text; ring: Graphics }[] = [];
+  private boosterHint: Container | null = null;
 
   constructor(private app: App, public levelNo: number, public W: number, public H: number) {
     super();
@@ -64,7 +80,7 @@ export class GameScene extends Container {
       const count = gd.count ?? this.countInGrid(gd.type);
       const node = new Container();
       node.position.set(12 + 20 + (goalArea - 20 - n * gw) / 2 + gw * (i + 0.5), hudY + hudH / 2 + 4);
-      const icon = new Sprite(tex(GOAL_TEX[gd.type]));
+      const icon = new Sprite(gd.type === 'gold' ? texOr('it_chest', 'ic_coin') : tex(GOAL_TEX[gd.type]));
       icon.anchor.set(0.5);
       icon.scale.set(Math.min(74, gw - 10) / icon.texture.width);
       icon.y = -14;
@@ -94,7 +110,7 @@ export class GameScene extends Container {
 
     // ---------------- board
     const top = hudY + hudH + 30;
-    const bottomReserve = 110;
+    const bottomReserve = 150;
     const availH = H - top - bottomReserve;
     const availW = W - 56;
     const cols = this.def.grid[0].length, rows = this.def.grid.length;
@@ -120,23 +136,66 @@ export class GameScene extends Container {
       collect: (type, gx, gy, t) => this.collect(type, gx, gy, t),
       wantsGoal: (type) => this.goals.some((g) => g.type === type && g.left > 0),
       powerCreated: (kind) => this.powerTip(kind),
+      impact: (lvl) => this.impact(lvl),
+      stat: (key, n) => trackQuest(key, n ?? 1),
+      goalAdded: (type) => {
+        const g = this.goals.find((q) => q.type === type);
+        if (!g) return;
+        g.left++;
+        g.shown++;
+        g.txt.visible = true;
+        g.tick.visible = false;
+        g.txt.text = String(g.shown);
+      },
     });
     this.board.position.set(bx, by);
     this.boardHolder.addChild(this.board);
-    this.addChild(this.boardHolder, frame);
+    const cx = bx + bw / 2, cy = by + bh / 2;
+    this.playfield.pivot.set(cx, cy);
+    this.playfield.position.set(cx, cy);
+    this.playfield.addChild(this.boardHolder, frame);
+    this.addChild(this.playfield);
 
-    // ---------------- bottom bar
-    const gear = iconButton('ic_gear', 92, () => this.openPause());
-    gear.position.set(70, H - 66);
-    this.addChild(gear);
+    // combo counter (shows during long cascades)
+    this.comboTxt = label('', 40, { fill: 0xffe066, stroke: 0x7a2e00, strokeW: 8 });
+    this.comboTxt.position.set(W / 2, by - 42);
+    this.comboTxt.alpha = 0;
+
+    // ---------------- bottom bar: pause + in-game boosters
+    const barY = Math.min(H - 70, by + bh + 92);
+    const gear = iconButton('ic_gear', 88, () => this.openPause());
+    gear.position.set(64, barY);
+    this.addChild(gear, this.comboTxt);
+    BOOSTERS.forEach((b, i) => {
+      const node = new Container();
+      node.position.set(200 + i * 130, barY);
+      const ring = new Graphics().circle(0, 0, 54).stroke({ width: 7, color: 0x5fe05a });
+      ring.visible = false;
+      const bg = new Graphics().circle(0, 0, 48).fill({ color: 0x2a1408, alpha: 0.88 }).stroke({ width: 4, color: 0xd9a53c });
+      const ic = new Sprite(texOr(b.tex, b.fallback));
+      ic.anchor.set(0.5);
+      ic.scale.set(76 / ic.texture.width);
+      ic.rotation = hasTex(b.tex) ? 0 : b.rot;
+      const badge = label('', 22);
+      badge.position.set(34, 32);
+      const badgeBg = new Graphics().circle(34, 32, 19).fill({ color: 0x8e1d1d }).stroke({ width: 3, color: 0xffffff });
+      node.addChild(ring, bg, ic, badgeBg, badge);
+      node.eventMode = 'static';
+      node.cursor = 'pointer';
+      node.on('pointertap', () => this.tapBooster(b.k));
+      this.addChild(node);
+      this.boosterBtns.push({ k: b.k, node, badge, ring });
+    });
+    this.refreshBoosters();
+    this.board.onBoosterUsed = (k) => this.boosterConsumed(k);
 
     this.addChild(this.flyLayer, this.popupLayer);
     this.intro();
   }
 
   private countInGrid(type: GoalType): number {
-    const chars = type === 'crate' ? '123' : type === 'stone' ? '456' : type === 'vines' ? 'v' : type === 'chain' ? 'c' : '';
-    let n = 0;
+    const chars = type === 'crate' ? '123' : type === 'stone' ? '456' : type === 'vines' ? 'vg' : type === 'chain' ? 'c' : type === 'gold' ? 'T' : '';
+    let n = type === 'gold' ? this.def.items ?? 0 : 0;
     for (const row of this.def.grid) for (const ch of row) if (chars.includes(ch)) n++;
     return n;
   }
@@ -147,7 +206,8 @@ export class GameScene extends Container {
       const boosters = await this.startPopup();
       await this.mechanicTip();
       if (this.state === 'play') this.board.inputEnabled = true;
-      if (boosters.length) this.board.addStartBoosters(boosters);
+      const all = [...boosters, ...streakBonus()];
+      if (all.length) this.board.addStartBoosters(all);
       return;
     }
     const banner = new Container();
@@ -274,6 +334,12 @@ export class GameScene extends Container {
       coinRow.addChild(ci, coinTxt);
       coinRow.position.set(150, coinY);
       panel.addChild(coinRow);
+      const sb = streakBonus();
+      if (sb.length) {
+        const st = label(`Seri bonusu (${getSave().streak} galibiyet): +${sb.length} hediye güçlendirici!`, 22, { fill: 0x2f7a1a, stroke: 0xfff2d0, strokeW: 4, shadow: false });
+        st.y = y + ph * 0.115;
+        panel.addChild(st);
+      }
       const play = new Button('green', 280, 'Oyna', () => {
         const kinds = [...chosen].map((i) => opts[i].kind);
         getSave().coins -= spent();
@@ -299,6 +365,9 @@ export class GameScene extends Container {
       7: { key: 'tip_stone', title: 'Yeni: Taş Blok', icons: ['ob_stone1', 'ob_stone2'], text: 'Taş bloklar sağlamdır,\nkırılmak için birkaç vuruş ister.' },
       8: { key: 'tip_vines', title: 'Yeni: Dikenli Sarmaşık', icons: ['ob_vines'], text: 'Sarmaşığın yanında eşleşme yap\nya da güçlendiriciyle temizle.' },
       13: { key: 'tip_purple', title: 'Yeni Renk!', icons: ['tile_purple'], text: 'Büyü kitabı tahtaya katıldı.\nArtık 5 renk var, eşleşmeler zorlaşıyor!' },
+      31: { key: 'tip_gold', title: 'Yeni: Kraliyet Hazinesi', icons: [hasTex('it_chest') ? 'it_chest' : 'ic_coin'], text: 'Hazineyi eşleşmelerle aşağı indir.\nTahtanın en altına ulaşınca toplanır!' },
+      32: { key: 'tip_portal', title: 'Yeni: Büyülü Geçit', icons: ['p_ring'], text: 'Bir geçidin altına düşen taşlar\ndiğer geçitten çıkar.' },
+      33: { key: 'tip_grow', title: 'Yeni: Büyüyen Sarmaşık', icons: ['ob_vines'], text: 'Bir hamlede hiç sarmaşık kırmazsan\nsarmaşık yanındaki taşa yayılır!' },
     };
     const tip = tips[this.levelNo];
     if (!tip || !firstTime(tip.key)) return Promise.resolve();
@@ -361,6 +430,90 @@ export class GameScene extends Container {
     this.movesTxt.scale.set(1.3);
     tween(this.movesTxt.scale, { x: 1, y: 1 }, 0.25, Ease.outBack);
     this.movesTxt.style.fill = this.moves <= 5 ? 0xff7a6a : 0xffffff;
+    if (this.moves <= 5 && this.moves > 0 && this.state === 'play') {
+      // tension: shake the counter, speed up the music, one-time banner
+      const x0 = this.W - 24 - 92;
+      tween(this.movesNode, { x: x0 + 8 }, 0.05).then(() => tween(this.movesNode, { x: x0 }, 0.3, Ease.outElastic));
+      if (!this.lowMoves && !this.goalsDone()) {
+        this.lowMoves = true;
+        setMusicIntensity(true);
+        this.praise('Son 5 hamle!', 0xff8a7a);
+      }
+    }
+  }
+
+  /** Hit-stop + small camera punch for big moments. */
+  private impact(level: number) {
+    this.hitStop = 0.035 + level * 0.03;
+    this.timeScale = 0.08;
+    killTweens(this.playfield.scale);
+    const z = 1 + 0.012 * level;
+    this.playfield.scale.set(z);
+    tween(this.playfield.scale, { x: 1, y: 1 }, 0.35 + level * 0.1, Ease.outCubic);
+  }
+
+  private refreshBoosters() {
+    const inv = getSave().inv;
+    for (const b of this.boosterBtns) {
+      const n = inv[b.k];
+      b.badge.text = n > 0 ? String(n) : '+';
+      b.ring.visible = this.board?.pendingBooster === b.k;
+    }
+  }
+
+  private tapBooster(k: BoosterKind) {
+    if (this.state !== 'play' || !this.board.inputEnabled) return;
+    sfx.click();
+    const info = BOOSTERS.find((b) => b.k === k)!;
+    const s = getSave();
+    if (this.board.pendingBooster === k) {
+      this.board.pendingBooster = null;
+      this.showBoosterHint(null);
+      this.refreshBoosters();
+      return;
+    }
+    if (s.inv[k] <= 0) {
+      if (s.coins < info.price) {
+        sfx.invalid();
+        this.praise(`${info.price} altın gerekli`, 0xff8a7a);
+        return;
+      }
+      s.coins -= info.price;
+      s.inv[k] += 1;
+      save();
+      sfx.coin();
+    }
+    if (k === 'shuffle') {
+      if (!this.board.isStable()) return;
+      this.board.useBooster('shuffle', 0, 0);
+      this.boosterConsumed('shuffle');
+      return;
+    }
+    this.board.pendingBooster = k;
+    this.showBoosterHint(info.hint);
+    this.refreshBoosters();
+  }
+
+  private boosterConsumed(k: BoosterKind) {
+    const s = getSave();
+    s.inv[k] = Math.max(0, s.inv[k] - 1);
+    save();
+    trackQuest('booster');
+    this.showBoosterHint(null);
+    this.refreshBoosters();
+  }
+
+  private showBoosterHint(text: string | null) {
+    this.boosterHint?.destroy({ children: true });
+    this.boosterHint = null;
+    if (!text) return;
+    const c = new Container();
+    const bg = new Graphics().roundRect(-300, -34, 600, 68, 34).fill({ color: 0x2a1408, alpha: 0.92 }).stroke({ width: 4, color: 0x5fe05a });
+    const t = label(text, 26);
+    c.addChild(bg, t);
+    c.position.set(this.W / 2, this.board.y - 42);
+    this.flyLayer.addChild(c);
+    this.boosterHint = c;
   }
 
   private collect(type: GoalType, gx: number, gy: number, texName: string) {
@@ -408,12 +561,29 @@ export class GameScene extends Container {
   }
 
   update(dt: number) {
-    this.board.update(dt);
+    if (this.hitStop > 0) {
+      this.hitStop -= dt;
+      if (this.hitStop <= 0) this.timeScale = 1;
+    }
+    this.board.update(dt * this.timeScale);
+    if (this.comboTimer > 0) {
+      this.comboTimer -= dt;
+      if (this.comboTimer <= 0) tween(this.comboTxt, { alpha: 0 }, 0.3);
+    }
     if (this.praiseCooldown > 0) this.praiseCooldown -= dt;
     // praise for long cascades
     const cs = this.board.cascade;
     if (cs !== this.lastCascade) {
       this.lastCascade = cs;
+      if (cs >= 2) {
+        this.comboTxt.text = `Kombo x${cs}`;
+        killTweens(this.comboTxt);
+        killTweens(this.comboTxt.scale);
+        this.comboTxt.alpha = 1;
+        this.comboTxt.scale.set(1.35);
+        tween(this.comboTxt.scale, { x: 1, y: 1 }, 0.25, Ease.outBack);
+        this.comboTimer = 0.9;
+      }
       const words: Record<number, string> = { 4: 'Güzel!', 6: 'Harika!', 9: 'Muhteşem!', 13: 'İnanılmaz!' };
       if (words[cs] && this.praiseCooldown <= 0) {
         this.praise(words[cs]);
@@ -432,8 +602,8 @@ export class GameScene extends Container {
     }
   }
 
-  private praise(word: string) {
-    const t = label(word, 72, { fill: 0xffe066, stroke: 0x7a2e00, strokeW: 10 });
+  private praise(word: string, fill = 0xffe066) {
+    const t = label(word, 72, { fill, stroke: 0x7a2e00, strokeW: 10 });
     t.position.set(this.W / 2, this.board.y + (this.board.H * this.board.S) / 2);
     t.scale.set(0.2);
     this.flyLayer.addChild(t);
@@ -472,6 +642,9 @@ export class GameScene extends Container {
     s.coins += reward;
     if (s.level <= this.levelNo) s.level = this.levelNo + 1;
     s.best = Math.max(s.best, this.levelNo);
+    s.streak += 1;
+    trackQuest('win');
+    addRoadPoints(diff === 'superhard' ? 3 : diff === 'hard' ? 2 : 1);
     save();
     this.showWinPopup(reward);
   }
@@ -577,7 +750,11 @@ export class GameScene extends Container {
       more.enabled = false;
       more.alpha = 0.5;
     }
-    const quit = new Button('red', 260, 'Pes Et', () => this.app.showMenu(), 34);
+    const quit = new Button('red', 260, 'Pes Et', () => {
+      getSave().streak = 0;
+      save();
+      this.app.showMenu();
+    }, 34);
     quit.y = ph * 0.32;
     panel.addChild(more, quit);
   }
@@ -610,13 +787,20 @@ export class GameScene extends Container {
     );
     const resume = new Button('green', 280, 'Devam Et', close, 34);
     resume.y = ph * 0.13;
-    const quit = new Button('red', 280, 'Ana Menü', () => this.app.showMenu(), 34);
+    const quit = new Button('red', 280, 'Ana Menü', () => {
+      if (this.moves < this.def.moves) {
+        getSave().streak = 0; // leaving a started level breaks the streak
+        save();
+      }
+      this.app.showMenu();
+    }, 34);
     quit.y = ph * 0.305;
     panel.addChild(resume, quit);
   }
 
   destroyScene() {
     clearTimers('ui');
+    setMusicIntensity(false);
     this.board.destroyBoard();
     this.destroy({ children: true });
   }

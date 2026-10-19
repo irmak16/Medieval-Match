@@ -19,6 +19,37 @@ export async function loadAssets(onProgress?: (p: number) => void): Promise<void
   await Assets.loadBundle('main', onProgress);
 }
 
+/** Optional art (booster icons, treasure chest, castle pieces). Missing files are simply skipped. */
+export const OPTIONAL = [
+  'bt_hammer', 'bt_row', 'bt_col', 'bt_shuffle', 'it_chest', 'ob_vines_grow',
+  'castle_1', 'castle_2', 'castle_3', 'castle_4', 'castle_5', 'castle_6',
+];
+const loadedOptional = new Set<string>();
+
+export async function loadOptional(): Promise<void> {
+  await Promise.all(
+    OPTIONAL.map(async (n) => {
+      try {
+        const res = await fetch(`assets/${n}.png`, { method: 'HEAD' });
+        if (!res.ok || !(res.headers.get('content-type') || '').includes('image')) return;
+        await Assets.load({ alias: n, src: `assets/${n}.png` });
+        loadedOptional.add(n);
+      } catch {
+        /* not available yet */
+      }
+    }),
+  );
+}
+
+export function hasTex(name: string): boolean {
+  return loadedOptional.has(name);
+}
+
+/** Texture with a fallback when an optional asset is missing. */
+export function texOr(name: string, fallback: string): Texture {
+  return Texture.from(hasTex(name) ? name : fallback);
+}
+
 export function tex(name: string): Texture {
   return Texture.from(name);
 }

@@ -1,11 +1,12 @@
 import { Container, Graphics, Sprite, Rectangle, FederatedPointerEvent, Point } from 'pixi.js';
-import { tex, COLOR_TEX, COLOR_TINT } from '../assets';
+import { tex, hasTex, COLOR_TEX, COLOR_TINT } from '../assets';
 import { FX } from '../fx';
 import { tween, Ease, after, pendingTimers, clearTimers, killTweens } from '../tween';
 import { sfx } from '../audio';
 import { LevelDef, GoalType, COLOR_GOALS } from '../levels';
 
-export type Kind = 'c' | 'ah' | 'av' | 'barrel' | 'falcon' | 'orb';
+export type Kind = 'c' | 'ah' | 'av' | 'barrel' | 'falcon' | 'orb' | 'gold';
+export type BoosterKind = 'hammer' | 'row' | 'col' | 'shuffle';
 type TState = 'idle' | 'fall' | 'swap' | 'spawn';
 type BlockType = 'crate' | 'stone' | 'vines';
 
@@ -33,11 +34,14 @@ export class Tile {
     this.view.addChild(this.spr);
   }
   get isPower(): boolean {
-    return this.kind !== 'c';
+    return this.kind !== 'c' && this.kind !== 'gold';
+  }
+  get isItem(): boolean {
+    return this.kind === 'gold';
   }
 }
 
-interface Blocker { type: BlockType; hp: number; spr: Sprite }
+interface Blocker { type: BlockType; hp: number; spr: Sprite; grow?: boolean }
 interface Cell { ok: boolean; blocker: Blocker | null; chain: Sprite | null; tile: Tile | null }
 
 interface Projectile { update(dt: number): boolean } // returns false when finished
@@ -48,6 +52,12 @@ export interface BoardHooks {
   collect(type: GoalType, gx: number, gy: number, texture: string): void;
   wantsGoal(type: GoalType): boolean;
   powerCreated?(kind: Kind): void;
+  /** Big moments (1 = small blast … 3 = board wipe) for hit-stop / camera zoom. */
+  impact?(level: number): void;
+  /** Statistics for daily quests: 'tile', 'power', 'crate', 'stone', 'vines', 'chain', 'gold'. */
+  stat?(key: string, n?: number): void;
+  /** A goal grew (spreading vines). */
+  goalAdded?(type: GoalType): void;
 }
 
 interface Group { cells: Tile[]; power: Kind | null; anchor: Tile }
@@ -80,6 +90,13 @@ export class Board extends Container {
   private shuffling = false;
   private time = 0;
   private changed = false;
+  private moveActive = false; // a player move is resolving
+  private vinesBroken = false;
+  private itemsLeft = 0; // collectible items still to spawn
+  private portals: { from: [number, number]; to: [number, number] }[] = [];
+  private bias = 0; // spawn bias: >0 helps the player, <0 hinders (sawtooth difficulty)
+  pendingBooster: BoosterKind | null = null;
+  onBoosterUsed: ((k: BoosterKind) => void) | null = null;
 
   constructor(public def: LevelDef, size: number, public hooks: BoardHooks) {
     super();
@@ -117,6 +134,7 @@ export class Board extends Container {
         if ('123'.includes(ch)) this.addBlocker(r, c, 'crate', +ch);
         else if ('456'.includes(ch)) this.addBlocker(r, c, 'stone', +ch - 3);
         else if (ch === 'v') this.addBlocker(r, c, 'vines', 1);
+        else if (ch === 'g') this.addBlocker(r, c, 'vines', 1, true);
         else {
           let kind: Kind = 'c';
           if (ch === 'H') kind = 'ah';
@@ -124,6 +142,7 @@ export class Board extends Container {
           else if (ch === 'B') kind = 'barrel';
           else if (ch === 'F') kind = 'falcon';
           else if (ch === 'O') kind = 'orb';
+          else if (ch === 'T') kind = 'gold';
           const t = this.makeTile(kind, kind === 'c' ? this.safeColor(r, c) : -1);
           this.place(t, r, c);
           t.y = r;
@@ -133,6 +152,13 @@ export class Board extends Container {
       }
     this.ensureMoves(true);
     for (const t of this.tiles) this.syncView(t);
+    this.itemsLeft = def.items ?? 0;
+    this.bias = def.diff === 'superhard' ? -0.5 : def.diff === 'hard' ? -0.35 : 0.12;
+    for (const pr of def.portals ?? []) {
+      this.portals.push({ from: [pr[0], pr[1]], to: [pr[2], pr[3]] });
+      this.drawPortal(pr[0] + 1, pr[1], 0xb070ff); // entrance: bottom edge of the cell
+      this.drawPortal(pr[2], pr[3], 0x70d0ff); // exit: top edge of the cell
+    }
 
     // --- input
     this.eventMode = 'static';
@@ -181,8 +207,9 @@ export class Board extends Container {
     else if (kind === 'barrel') name = 'pw_barrel';
     else if (kind === 'falcon') name = 'pw_falcon';
     else if (kind === 'orb') name = 'pw_orb';
+    else if (kind === 'gold') name = hasTex('it_chest') ? 'it_chest' : 'ic_coin';
     t.spr.texture = tex(name);
-    const scale = kind === 'c' ? 0.9 : kind === 'falcon' ? 1.04 : 0.98;
+    const scale = kind === 'c' ? 0.9 : kind === 'falcon' ? 1.04 : kind === 'gold' ? 0.84 : 0.98;
     t.spr.scale.set((S * scale) / t.spr.texture.width);
     t.spr.rotation = kind === 'av' ? -Math.PI / 2 : 0;
     t.spr.position.set(0, 0);
@@ -214,12 +241,12 @@ export class Board extends Container {
     return opts[rnd(opts.length)];
   }
 
-  private addBlocker(r: number, c: number, type: BlockType, hp: number) {
+  private addBlocker(r: number, c: number, type: BlockType, hp: number, grow = false) {
     const spr = new Sprite();
     spr.anchor.set(0.5);
     spr.position.set((c + 0.5) * this.S, (r + 0.5) * this.S);
     this.blockLayer.addChild(spr);
-    const b: Blocker = { type, hp, spr };
+    const b: Blocker = { type, hp, spr, grow };
     this.grid[r][c].blocker = b;
     this.styleBlocker(b);
   }
@@ -232,6 +259,10 @@ export class Board extends Container {
     } else if (b.type === 'stone') {
       name = b.hp >= 2 ? 'ob_stone1' : 'ob_stone2';
       if (b.hp >= 3) tint = 0x9aa3b8;
+    }
+    if (b.grow) {
+      name = hasTex('ob_vines_grow') ? 'ob_vines_grow' : 'ob_vines';
+      if (name === 'ob_vines') tint = 0xc8ff8a;
     }
     b.spr.texture = tex(name);
     b.spr.tint = tint;
@@ -276,6 +307,15 @@ export class Board extends Container {
   private onDown(e: FederatedPointerEvent) {
     if (!this.inputEnabled) return;
     const p = this.cellAt(e);
+    if (this.pendingBooster) {
+      const cl = this.cell(p.r, p.c);
+      if (!cl || !cl.ok || !this.isStable()) return;
+      const k = this.pendingBooster;
+      this.pendingBooster = null;
+      this.useBooster(k, p.r, p.c);
+      this.onBoosterUsed?.(k);
+      return;
+    }
     const t = this.cell(p.r, p.c)?.tile;
     this.drag = { ...p, moved: false };
     this.clearHint();
@@ -304,10 +344,71 @@ export class Board extends Container {
     if (t) tween(t.view.scale, { x: 1, y: 1 }, 0.12);
     if (!d.moved && this.inputEnabled && t && t.isPower && t.state === 'idle' && !this.grid[d.r][d.c].chain) {
       if (!this.hooks.canMove()) return;
-      this.hooks.useMove();
+      this.spendMove();
       this.cascade = 0;
       this.activate(t);
     }
+  }
+
+  private spendMove() {
+    this.hooks.useMove();
+    this.moveActive = true;
+    this.vinesBroken = false;
+  }
+
+  private drawPortal(r: number, c: number, tint: number) {
+    const ring = new Sprite(tex('p_ring'));
+    ring.anchor.set(0.5);
+    ring.blendMode = 'add';
+    ring.tint = tint;
+    ring.scale.set((this.S * 0.95) / 128, (this.S * 0.32) / 128);
+    ring.position.set((c + 0.5) * this.S, r * this.S);
+    this.fxAdd.addChild(ring);
+    const glow = new Sprite(tex('p_glow'));
+    glow.anchor.set(0.5);
+    glow.blendMode = 'add';
+    glow.tint = tint;
+    glow.scale.set((this.S * 0.9) / 128, (this.S * 0.35) / 128);
+    glow.position.copyFrom(ring.position);
+    this.fxAdd.addChild(glow);
+    const loop = () => {
+      if (glow.destroyed) return;
+      tween(glow, { alpha: 0.35 }, 0.6, Ease.inOutQuad).then(() => tween(glow, { alpha: 1 }, 0.6, Ease.inOutQuad).then(loop));
+    };
+    loop();
+  }
+
+  /** If an empty cell in column c (at row r) is fed by a portal, return that portal. */
+  private portalFor(r: number, c: number) {
+    for (const p of this.portals) if (p.to[1] === c && p.to[0] <= r) {
+      let ok = true;
+      for (let k = p.to[0]; k < r; k++) {
+        const ck = this.grid[k][c];
+        if (ck.ok && (ck.blocker || ck.tile)) ok = false;
+      }
+      if (ok) return p;
+    }
+    return null;
+  }
+
+  private spawnColor(r: number, c: number): number {
+    const n = this.colors;
+    const col = (rr: number, cc: number) => {
+      const t = this.cell(rr, cc)?.tile;
+      return t && t.kind === 'c' ? t.color : -2;
+    };
+    const matching = new Set<number>();
+    for (let k = 0; k < n; k++) {
+      if ((col(r + 1, c) === k && col(r + 2, c) === k) || (col(r, c - 1) === k && col(r, c - 2) === k) ||
+          (col(r, c + 1) === k && col(r, c + 2) === k) || (col(r, c - 1) === k && col(r, c + 1) === k)) matching.add(k);
+    }
+    const roll = Math.random();
+    if (this.bias > 0 && roll < this.bias && matching.size) return [...matching][rnd(matching.size)];
+    if (this.bias < 0 && roll < -this.bias) {
+      const safe = [...Array(n).keys()].filter((k) => !matching.has(k));
+      if (safe.length) return safe[rnd(safe.length)];
+    }
+    return rnd(n);
   }
 
   private swappable(t: Tile | null | undefined): t is Tile {
@@ -334,7 +435,7 @@ export class Board extends Container {
       this.busy--;
       if (a.isPower || b.isPower) {
         a.state = b.state = 'idle';
-        this.hooks.useMove();
+        this.spendMove();
         if (a.isPower && b.isPower) this.combo(a, b);
         else {
           const p = a.isPower ? a : b, o = a.isPower ? b : a;
@@ -346,7 +447,7 @@ export class Board extends Container {
       const groups = this.findMatches();
       const hit = groups.some((g) => g.cells.includes(a) || g.cells.includes(b));
       if (hit) {
-        this.hooks.useMove();
+        this.spendMove();
         a.stamp = ++this.stamp + 1000000; // player-moved tiles win power-up placement
         b.stamp = ++this.stamp + 1000000;
       } else {
@@ -397,6 +498,11 @@ export class Board extends Container {
     const sh = this.fx.shakeOffset;
     this.pivot.set(-sh.x, -sh.y);
 
+    if (!this.shuffling) this.collectItems();
+    if (this.isStable() && this.moveActive) {
+      this.moveActive = false;
+      this.endOfMove();
+    }
     if (this.isStable()) {
       this.idleTime += dt;
       if (!this.shuffling && !this.hasMoves()) this.shuffle();
@@ -404,6 +510,53 @@ export class Board extends Container {
     } else {
       this.idleTime = 0;
     }
+  }
+
+  /** Collectible items that reached the bottom of their column are collected. */
+  private collectItems() {
+    for (const t of this.tiles) {
+      if (!t.isItem || t.state !== 'idle') continue;
+      let bottom = true;
+      for (let k = t.r + 1; k < this.H; k++) if (this.grid[k][t.c].ok) bottom = false;
+      if (!bottom) continue;
+      this.detach(t);
+      const g = this.toGlobal(t.view.position);
+      this.hooks.collect('gold', g.x, g.y, hasTex('it_chest') ? 'it_chest' : 'ic_coin');
+      this.hooks.stat?.('gold');
+      sfx.coin();
+      this.fx.sparkleBurst(t.view.x, t.view.y, 16, 0xffe070, 4);
+      const v = t.view;
+      tween(v.scale, { x: 1.4, y: 1.4 }, 0.12).then(() => tween(v, { alpha: 0 }, 0.12).then(() => v.destroy({ children: true })));
+    }
+  }
+
+  /** Called once the cascade of a player move has fully settled. */
+  private endOfMove() {
+    if (this.vinesBroken) return;
+    const growers: [number, number][] = [];
+    for (let r = 0; r < this.H; r++) for (let c = 0; c < this.W; c++) if (this.grid[r][c].blocker?.grow) growers.push([r, c]);
+    if (!growers.length) return;
+    const options: [number, number][] = [];
+    for (const [r, c] of growers)
+      for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const cl = this.cell(r + dr, c + dc);
+        if (cl && cl.ok && !cl.blocker && !cl.chain && cl.tile && cl.tile.kind === 'c' && cl.tile.state === 'idle') options.push([r + dr, c + dc]);
+      }
+    if (!options.length) return;
+    const [r, c] = options[rnd(options.length)];
+    const t = this.grid[r][c].tile!;
+    this.grid[r][c].tile = null;
+    this.tiles.delete(t);
+    tween(t.view.scale, { x: 0, y: 0 }, 0.2, Ease.inBack).then(() => t.view.destroy({ children: true }));
+    this.addBlocker(r, c, 'vines', 1, true);
+    const b = this.grid[r][c].blocker!;
+    const s = b.spr.scale.x;
+    b.spr.scale.set(0);
+    tween(b.spr.scale, { x: s, y: s }, 0.4, Ease.outBack);
+    sfx.vines();
+    this.fx.debris((c + 0.5) * this.S, (r + 0.5) * this.S, 'leaf', 5);
+    this.hooks.goalAdded?.('vines');
+    this.changed = true;
   }
 
   isStable(): boolean {
@@ -422,7 +575,13 @@ export class Board extends Container {
         if (!cl.ok || cl.blocker || cl.tile) continue;
         let k = r - 1;
         while (k >= 0 && (!this.grid[k][c].ok || (!this.grid[k][c].blocker && !this.grid[k][c].tile))) k--;
-        if (k < 0) return true;
+        if (k < 0) {
+          const portal = this.portalFor(r, c);
+          if (!portal) return true;
+          const src = this.grid[portal.from[0]][portal.from[1]];
+          if (src.tile && src.tile.state === 'idle' && !src.chain) return true;
+          continue;
+        }
         const ck = this.grid[k][c];
         if (ck.tile && this.movable(ck.tile)) return true;
         for (const dc of [-1, 1]) {
@@ -453,12 +612,34 @@ export class Board extends Container {
           else break;
         }
         if (k < 0) {
+          const portal = this.portalFor(r, c);
+          if (portal) {
+            const src = this.grid[portal.from[0]][portal.from[1]];
+            const t = src.tile;
+            if (t && t.state === 'idle' && !src.chain && !src.blocker) {
+              src.tile = null;
+              this.fx.flash((portal.from[1] + 0.5) * this.S, (portal.from[0] + 1) * this.S, this.S, 0xc090ff, 0.25);
+              t.x = c;
+              t.y = portal.to[0] - 1;
+              t.vy = V0;
+              t.state = 'fall';
+              this.place(t, r, c);
+              this.syncView(t);
+              this.changed = true;
+            }
+            continue;
+          }
           // spawn from the top of the column
           let firstOk = 0;
           while (firstOk < this.H && !this.grid[firstOk][c].ok) firstOk++;
           let top: number = firstOk;
           for (const t of this.tiles) if (Math.round(t.x) === c && t.y < top) top = t.y;
-          const t = this.makeTile('c', rnd(this.colors));
+          let item = false;
+          if (this.itemsLeft > 0 && Math.random() < 0.25 && ![...this.tiles].some((q) => q.isItem)) {
+            item = true;
+            this.itemsLeft--;
+          }
+          const t = item ? this.makeTile('gold', -1) : this.makeTile('c', this.spawnColor(r, c));
           t.x = c;
           t.y = Math.min(firstOk - 1, top - 1.05);
           t.vy = V0;
@@ -732,6 +913,7 @@ export class Board extends Container {
       after(0.12, () => {
         sfx.powerCreate();
         this.hooks.powerCreated?.(p.kind);
+        this.hooks.stat?.('power');
         this.fx.flash(p.view.x, p.view.y, S * 1.6, 0xfff3c0, 0.3);
         this.fx.sparkleBurst(p.view.x, p.view.y, 10, 0xfff2a0, 3);
         tween(p.view.scale, { x: 1, y: 1 }, 0.3, Ease.outBack).then(() => {
@@ -760,6 +942,7 @@ export class Board extends Container {
     if (cl && cl.tile === t) cl.tile = null;
     this.tiles.delete(t);
     this.collectColor(t);
+    this.hooks.stat?.('tile');
     t.state = 'spawn';
     this.fx.tilePop(t.view.x, t.view.y, t.color);
     const v = t.view;
@@ -786,6 +969,8 @@ export class Board extends Container {
       return;
     }
     cl.blocker = null;
+    if (b.type === 'vines') this.vinesBroken = true;
+    this.hooks.stat?.(b.type);
     const goal: GoalType = b.type;
     if (this.hooks.wantsGoal(goal)) {
       const g = this.toGlobal(new Point(x, y));
@@ -807,6 +992,7 @@ export class Board extends Container {
     const spr = cl.chain;
     cl.chain = null;
     sfx.chain();
+    this.hooks.stat?.('chain');
     const x = (c + 0.5) * this.S, y = (r + 0.5) * this.S;
     this.fx.debris(x, y, 'link', 6);
     if (this.hooks.wantsGoal('chain')) {
@@ -833,7 +1019,7 @@ export class Board extends Container {
       return;
     }
     const t = cl.tile;
-    if (!t || t.state === 'spawn' || t.state === 'swap') return;
+    if (!t || t.state === 'spawn' || t.state === 'swap' || t.isItem) return;
     if (t.isPower) {
       after(0.06, () => {
         if (this.grid[t.r][t.c].tile === t && t.state !== 'spawn') this.activate(t);
@@ -883,6 +1069,8 @@ export class Board extends Container {
     }
     const p = this.pos(r, c);
     this.fx.flash(p.x, p.y, this.S * 3, 0xfff0c0, 0.35);
+    this.hooks.impact?.(2);
+    this.hooks.stat?.('combo');
     this.busy++;
     after(0.12, () => {
       this.busy--;
@@ -957,6 +1145,7 @@ export class Board extends Container {
     if (big) sfx.bigBoom();
     else sfx.barrel();
     Board.buzz(big ? 60 : 30);
+    this.hooks.impact?.(big ? 2 : 1);
     this.fx.explosion(p.x, p.y, radius + 0.5);
     this.fx.shake(this.S * (big ? 0.22 : 0.13), big ? 0.45 : 0.3);
     for (let dr = -radius; dr <= radius; dr++)
@@ -1112,6 +1301,7 @@ export class Board extends Container {
   private boardWipe(r: number, c: number) {
     sfx.bigBoom();
     Board.buzz(90);
+    this.hooks.impact?.(3);
     sfx.orb();
     const p = this.pos(r, c);
     this.fx.flash(p.x, p.y, this.S * 8, 0xfff6d0, 0.6);
@@ -1218,12 +1408,13 @@ export class Board extends Container {
     }
   }
 
-  private shuffle() {
+  private shuffle(force = false) {
     this.shuffling = true;
     this.clearHint();
     sfx.shuffle();
     const free = [...this.tiles].filter((t) => t.kind === 'c' && !this.grid[t.r][t.c].chain);
     Promise.all(free.map((t) => tween(t.view.scale, { x: 0, y: 0 }, 0.2, Ease.inBack))).then(() => {
+      if (force) this.recolor(false);
       this.ensureMoves(false);
       if (!this.hasMoves()) this.recolor(false);
       Promise.all(free.map((t, i) => tween(t.view.scale, { x: 1, y: 1 }, 0.3, Ease.outBack, i * 0.006))).then(() => {
@@ -1273,6 +1464,29 @@ export class Board extends Container {
       await wait(0.1);
     }
     while (!this.isStable()) await wait(0.05);
+  }
+
+  /** In-game boosters (no move is spent). */
+  useBooster(k: BoosterKind, r: number, c: number) {
+    this.clearHint();
+    this.cascade = 0;
+    const p = this.pos(r, c);
+    if (k === 'hammer') {
+      sfx.stone();
+      this.fx.flash(p.x, p.y, this.S * 2, 0xffffff, 0.25);
+      this.fx.sparkleBurst(p.x, p.y, 14, 0xffe0a0, 4);
+      this.fx.shake(this.S * 0.08, 0.15);
+      // a hammer clears a whole blocker in one go
+      const cl = this.grid[r][c];
+      let n = cl.blocker ? cl.blocker.hp : 1;
+      while (n-- > 0) this.hitCell(r, c);
+      Board.buzz(25);
+    } else if (k === 'row') this.fireArrow(r, c, 'h');
+    else if (k === 'col') this.fireArrow(r, c, 'v');
+    else if (k === 'shuffle') {
+      this.fx.sparkleBurst((this.W / 2) * this.S, (this.H / 2) * this.S, 30, 0xffffff, 8);
+      this.shuffle(true);
+    }
   }
 
   /** Pre-level boosters: turn random normal tiles into the given power-ups. */

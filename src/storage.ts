@@ -6,19 +6,34 @@ export interface SaveData {
   music: boolean;
   seen: string[]; // tutorial tips already shown
   best: number; // highest level completed
+  streak: number; // consecutive wins (win-streak bonus)
+  inv: { hammer: number; row: number; col: number; shuffle: number }; // in-game booster inventory
+  daily: { last: string; day: number };
+  quests: { date: string; list: { key: string; target: number; progress: number; reward: number; claimed: boolean }[] };
+  road: { week: string; points: number; claimed: number[] };
+  castle: { done: string[] };
 }
 
 const KEY = 'medieval-match-save-v1';
-const DEFAULTS: SaveData = { level: 1, stars: 0, coins: 300, sound: true, music: true, seen: [], best: 0 };
+const DEFAULTS: SaveData = {
+  level: 1, stars: 0, coins: 300, sound: true, music: true, seen: [], best: 0, streak: 0,
+  inv: { hammer: 2, row: 1, col: 1, shuffle: 1 },
+  daily: { last: '', day: 0 },
+  quests: { date: '', list: [] },
+  road: { week: '', points: 0, claimed: [] },
+  castle: { done: [] },
+};
 
-let data: SaveData = { ...DEFAULTS };
+let data: SaveData = structuredClone(DEFAULTS);
 /** Set when the page was opened with ?level=N (testing): tutorials and start popups are skipped. */
 export const DEV = { on: false };
 
 export function loadSave(): SaveData {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) data = { ...DEFAULTS, ...JSON.parse(raw) };
+    if (raw) data = { ...structuredClone(DEFAULTS), ...JSON.parse(raw) };
+    else data = structuredClone(DEFAULTS);
+    data.inv = { ...DEFAULTS.inv, ...data.inv };
     if (!Array.isArray(data.seen)) data.seen = [];
     data.best = Math.max(data.best ?? 0, data.level - 1);
   } catch {

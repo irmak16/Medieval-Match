@@ -3,7 +3,8 @@ import { tex } from './assets';
 import { tween, Ease } from './tween';
 import { sfx, unlockAudio } from './audio';
 
-export const FONT = '"Lilita One", "Arial Rounded MT Bold", sans-serif';
+// Titan One is a chunky mobile-game face with Turkish ş/ğ; Baloo 2 covers the few glyphs it lacks (İ).
+export const FONT = '"Titan One", "Baloo 2", "Arial Rounded MT Bold", sans-serif';
 
 export function label(
   text: string,

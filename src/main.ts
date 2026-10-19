@@ -1,13 +1,15 @@
-import '@fontsource/lilita-one/latin-400.css';
-import '@fontsource/lilita-one/latin-ext-400.css';
+import '@fontsource/titan-one/latin-400.css';
+import '@fontsource/titan-one/latin-ext-400.css';
+import '@fontsource/baloo-2/latin-ext-800.css';
 import { Application, Container, Sprite } from 'pixi.js';
-import { loadAssets, tex } from './assets';
+import { loadAssets, loadOptional, tex } from './assets';
 import { updateTweens } from './tween';
 import { loadSave } from './storage';
 import { unlockAudio } from './audio';
 import { MenuScene } from './scenes/menu';
 import { GameScene } from './scenes/game';
 import { LevelsScene } from './scenes/levels';
+import { CastleScene } from './scenes/castle';
 
 const DESIGN_W = 720;
 const MIN_H = 1150;
@@ -16,7 +18,7 @@ export class App {
   pixi = new Application();
   bg!: Sprite;
   root = new Container();
-  scene: MenuScene | GameScene | LevelsScene | null = null;
+  scene: MenuScene | GameScene | LevelsScene | CastleScene | null = null;
   sceneH = 1280;
 
   async start() {
@@ -30,7 +32,11 @@ export class App {
     document.getElementById('app')!.appendChild(this.pixi.canvas);
     loadSave();
     try {
-      await Promise.all([document.fonts.load('40px "Lilita One"'), document.fonts.load('40px "Lilita One"', 'ğüşıöçİ')]);
+      await Promise.all([
+        document.fonts.load('40px "Titan One"'),
+        document.fonts.load('40px "Titan One"', 'ğüşıöçĞŞ'),
+        document.fonts.load('800 40px "Baloo 2"', 'İ'),
+      ]);
     } catch {
       /* fall back to system font */
     }
@@ -38,6 +44,7 @@ export class App {
     await loadAssets((p) => {
       if (loader) loader.textContent = `Yükleniyor… %${Math.round(p * 100)}`;
     });
+    await loadOptional();
     document.getElementById('loader')?.remove();
 
     this.bg = new Sprite(tex('bg_game'));
@@ -81,7 +88,7 @@ export class App {
     this.bg.position.set(sw / 2, sh / 2);
   }
 
-  private setScene(make: (h: number) => MenuScene | GameScene | LevelsScene) {
+  private setScene(make: (h: number) => MenuScene | GameScene | LevelsScene | CastleScene) {
     if (this.scene) this.scene.destroyScene();
     const { h } = this.metrics();
     this.sceneH = Math.min(h, 1600);
@@ -99,6 +106,10 @@ export class App {
 
   showMenu() {
     this.setScene((h) => new MenuScene(this, DESIGN_W, h));
+  }
+
+  showCastle() {
+    this.setScene((h) => new CastleScene(this, DESIGN_W, h));
   }
 
   showLevels() {

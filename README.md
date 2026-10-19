@@ -10,7 +10,12 @@ Ortaçağ temalı, Royal Match tarzı bir match-3 oyunu. TypeScript + PixiJS ile
 - **5'li sıra → Kristal küre**: bir rengin tamamını siler.
 - Güçlendiricileri birbiriyle değiştirerek kombo yap (ör. küre + küre tüm tahtayı temizler).
 - Engeller: tahta sandık, taş blok (1–3 can), sarmaşık ve zincir.
-- 30 elle tasarlanmış seviye + 100 hazır üretilmiş seviye (toplam 130), sonrasında sonsuz otomatik seviye.
+- 40 elle tasarlanmış seviye + 100 hazır üretilmiş seviye (toplam 140), sonrasında sonsuz otomatik seviye.
+- Yeni mekanikler: **Kraliyet Hazinesi** (en alta indir), **Büyülü Geçit** (portal), **Büyüyen Sarmaşık**.
+- Oyun içi güçlendiriciler (hamle harcamaz): Çekiç, Okçu, Mancınık, Soytarı.
+- Kale restorasyonu: yıldızlarla 6 bölgeyi onar, her bölge ödül verir.
+- Günlük ödül, günlük görevler, haftalık Hazine Yolu, galibiyet serisi bonusu.
+- Kombo sayacı, hit-stop ve kamera vuruşu, son 5 hamlede hızlanan müzik, zorluğa göre akıllı taş düşürme.
 - Royal Match tarzı testere dişi zorluk: her 5. seviye **Zor**, her 10. seviye **Çok Zor**; ardından rahatlama seviyesi.
 - Seviye başında altınla güçlendirici seçimi (Ok, Fıçı, Küre), yeni mekaniklerde öğretici pencereler, Seviyeler ekranından eski seviyeleri tekrar oynama.
 
@@ -35,6 +40,10 @@ python3 tools/sim.py 12          # her seviyeyi 12 kez oynatır, kazanma oranlar
 python3 tools/tune_moves.py 24   # src/levels.ts içindeki hamle sayılarını yeniden ayarlar
 ```
 Hedefler: normal seviye ≈ %90, Zor ≈ %50, Çok Zor ≈ %30 bot kazanma oranı.
+
+## Eksik görseller (opsiyonel)
+`public/assets/` içine şu isimlerle PNG konursa oyun otomatik kullanır, yoksa yedek görsellerle çalışır:
+`bt_hammer`, `bt_row`, `bt_col`, `bt_shuffle`, `it_chest`, `ob_vines_grow`, `castle_1` … `castle_6`.
 
 ## Klasör yapısı
 - `src/` — oyun kodu (`game/board.ts` motorun kalbi)

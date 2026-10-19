@@ -206,6 +206,46 @@ export const sfx = {
 // ---------------- generative background music (lute-like plucks over a drone) ----------------
 let musicTimer: number | null = null;
 let musicStep = 0;
+let intense = false;
+
+function drum(t: number, low: boolean, vol: number) {
+  const c = ctx!;
+  if (low) {
+    const o = c.createOscillator();
+    o.frequency.setValueAtTime(110, t);
+    o.frequency.exponentialRampToValueAtTime(45, t + 0.15);
+    const g = c.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+    o.connect(g).connect(musicBus);
+    o.start(t);
+    o.stop(t + 0.25);
+  } else {
+    const src = c.createBufferSource();
+    src.buffer = noiseBuf;
+    const f = c.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.value = 2200;
+    f.Q.value = 1.5;
+    const g = c.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
+    src.connect(f).connect(g).connect(musicBus);
+    src.start(t, Math.random() * 0.5);
+    src.stop(t + 0.1);
+  }
+}
+
+/** Faster music with a frame drum when the player is running out of moves. */
+export function setMusicIntensity(on: boolean): void {
+  if (intense === on) return;
+  intense = on;
+  if (musicTimer !== null) {
+    clearInterval(musicTimer);
+    musicTimer = null;
+    updateMusic();
+  }
+}
 function pluck(freq: number, t: number, vol: number) {
   const c = ctx!;
   const o = c.createOscillator();
@@ -243,9 +283,13 @@ const CHORDS = [
 const PATTERN = [0, 2, 3, 4, 3, 2, 1, 2];
 function musicTick() {
   if (!ctx || ctx.state !== 'running') return;
-  const beat = 0.24;
+  const beat = intense ? 0.18 : 0.24;
   const t = ctx.currentTime + 0.05;
   for (let i = 0; i < 4; i++) {
+    const st = musicStep + i;
+    // soft frame drum: on beats 1 & 3 always, busier when intense
+    if (st % 4 === 0) drum(t + i * beat, true, intense ? 0.35 : 0.18);
+    if (intense && st % 2 === 1) drum(t + i * beat, false, 0.12);
     const step = musicStep + i;
     const chord = CHORDS[Math.floor(step / 16) % CHORDS.length];
     const p = PATTERN[step % PATTERN.length];
@@ -260,7 +304,7 @@ export function updateMusic(): void {
   const want = getSave().music && !!ctx;
   if (want && musicTimer === null) {
     musicTick();
-    musicTimer = window.setInterval(musicTick, 960);
+    musicTimer = window.setInterval(musicTick, intense ? 720 : 960);
   } else if (!want && musicTimer !== null) {
     clearInterval(musicTimer);
     musicTimer = null;

@@ -7,12 +7,19 @@
 //  1 2 3  wooden crate (hp)    4 5 6  stone block (hp 1..3)
 //  v  thorny vines          c  chained random tile
 //  H V  arrow (horizontal/vertical)   B barrel   F falcon   O crystal orb
+//  g  growing vines (spread when you don't clear vines in a move)   T treasure (bring it to the bottom)
 import { EXTRA_LEVELS } from './levels_extra';
 
-export type GoalType = 'red' | 'blue' | 'green' | 'yellow' | 'purple' | 'crate' | 'stone' | 'chain' | 'vines';
+export type GoalType = 'red' | 'blue' | 'green' | 'yellow' | 'purple' | 'crate' | 'stone' | 'chain' | 'vines' | 'gold';
 export type Difficulty = 'normal' | 'hard' | 'superhard';
 export interface GoalDef { type: GoalType; count?: number }
-export interface LevelDef { moves: number; colors: number; grid: string[]; goals: GoalDef[]; diff?: Difficulty }
+export interface LevelDef {
+  moves: number; colors: number; grid: string[]; goals: GoalDef[]; diff?: Difficulty;
+  /** extra treasure items that drop in during play (on top of 'T' cells in the grid) */
+  items?: number;
+  /** portals: [fromRow, fromCol, toRow, toCol] — tiles leaving the bottom of "from" enter the top of "to" */
+  portals?: [number, number, number, number][];
+}
 
 export const COLOR_GOALS: GoalType[] = ['red', 'blue', 'green', 'yellow', 'purple'];
 
@@ -31,7 +38,7 @@ const L: LevelDef[] = [
   { moves: 15, colors: 4, goals: [{ type: 'crate' }, { type: 'green', count: 14 }], grid: [
     '........', '........', '........', '...11...', '..1111..', '.111111.', '11....11', '1......1'] },
   // 5 · HARD: double crates at the bottom
-  { diff: 'hard', moves: 16, colors: 4, goals: [{ type: 'crate' }], grid: [
+  { diff: 'hard', moves: 22, colors: 4, goals: [{ type: 'crate' }], grid: [
     'x......x', '........', '........', '........', '........', '22222222', '22222222', '11....11'] },
 
   // ---------------------------------------------------------------- 6-10: chains & stone
@@ -45,10 +52,10 @@ const L: LevelDef[] = [
   { moves: 15, colors: 4, goals: [{ type: 'vines' }, { type: 'red', count: 40 }], grid: [
     'vvv..vvv', 'vv....vv', 'v......v', '........', '........', '........', '........', '........'] },
   // 9 · crates & chains mix
-  { moves: 18, colors: 4, goals: [{ type: 'crate' }, { type: 'chain' }], grid: [
+  { moves: 17, colors: 4, goals: [{ type: 'crate' }, { type: 'chain' }], grid: [
     '........', '.cc..cc.', '.cc..cc.', '........', '222..222', '1......1', '1......1', '11111111'] },
   // 10 · SUPER HARD: castle walls
-  { diff: 'superhard', moves: 22, colors: 4, goals: [{ type: 'stone' }, { type: 'crate' }], grid: [
+  { diff: 'superhard', moves: 23, colors: 4, goals: [{ type: 'stone' }, { type: 'crate' }], grid: [
     '5.5..5.5', '55....55', '5......5', '5.2222.5', '5.2332.5', '5.2222.5', '5......5', '55555555'] },
 
   // ---------------------------------------------------------------- 11-15: shapes & 5 colors
@@ -56,68 +63,100 @@ const L: LevelDef[] = [
   { moves: 15, colors: 4, goals: [{ type: 'green', count: 55 }], grid: [
     'xx....xx', 'x......x', '........', '...OO...', '........', '........', 'x......x', 'xx....xx'] },
   // 12 · diamond of crates
-  { moves: 26, colors: 4, goals: [{ type: 'crate' }], grid: [
+  { moves: 21, colors: 4, goals: [{ type: 'crate' }], grid: [
     '........', '...11...', '..1221..', '.123321.', '.123321.', '..1221..', '...11...', '........'] },
   // 13 · relief: 5 colors for the first time, but generous
-  { moves: 24, colors: 5, goals: [{ type: 'purple', count: 40 }, { type: 'blue', count: 40 }], grid: [
+  { moves: 22, colors: 5, goals: [{ type: 'purple', count: 40 }, { type: 'blue', count: 40 }], grid: [
     '........', '........', '........', '...FF...', '........', '........', '........', '........'] },
   // 14 · stone pillars
-  { moves: 18, colors: 4, goals: [{ type: 'stone' }, { type: 'blue', count: 40 }], grid: [
+  { moves: 16, colors: 4, goals: [{ type: 'stone' }, { type: 'blue', count: 40 }], grid: [
     '........', '.5....5.', '.5....5.', '.5....5.', '.5....5.', '.5....5.', '.5....5.', '........'] },
   // 15 · HARD: everything together
-  { diff: 'hard', moves: 18, colors: 4, goals: [{ type: 'crate' }, { type: 'stone' }, { type: 'chain' }], grid: [
+  { diff: 'hard', moves: 25, colors: 4, goals: [{ type: 'crate' }, { type: 'stone' }, { type: 'chain' }], grid: [
     '33....33', '3......3', '..cccc..', '..4444..', '..4444..', '..cccc..', '2......2', '22....22'] },
 
   // ---------------------------------------------------------------- 16-20: big boards
   // 16 · relief: 9x9 with power-ups
-  { moves: 27, colors: 5, goals: [{ type: 'red', count: 55 }, { type: 'yellow', count: 55 }], grid: [
+  { moves: 19, colors: 5, goals: [{ type: 'red', count: 55 }, { type: 'yellow', count: 55 }], grid: [
     '.........', '.........', '.........', '...F.F...', '....B....', '...F.F...', '.........', '.........', '.........'] },
   // 17 · crate floor
-  { moves: 25, colors: 4, goals: [{ type: 'crate' }], grid: [
+  { moves: 27, colors: 4, goals: [{ type: 'crate' }], grid: [
     '........', '........', '........', '........', '22222222', '22.22.22', '22222222', '11111111'] },
   // 18 · split board with vines
-  { moves: 20, colors: 4, goals: [{ type: 'vines' }, { type: 'stone' }, { type: 'green', count: 40 }], grid: [
+  { moves: 16, colors: 4, goals: [{ type: 'vines' }, { type: 'stone' }, { type: 'green', count: 40 }], grid: [
     '...xx...', '...xx...', '..v44v..', '..v44v..', '..v44v..', '..v44v..', '...xx...', '...xx...'] },
   // 19 · relief: chain frame with arrows
-  { moves: 19, colors: 4, goals: [{ type: 'chain' }, { type: 'green', count: 45 }], grid: [
+  { moves: 15, colors: 4, goals: [{ type: 'chain' }, { type: 'green', count: 45 }], grid: [
     'cc....cc', 'c......c', 'c......c', 'c..HV..c', 'c......c', 'c......c', 'c......c', 'cccccccc'] },
   // 20 · SUPER HARD: fortress
-  { diff: 'superhard', moves: 22, colors: 4, goals: [{ type: 'stone' }, { type: 'crate' }, { type: 'chain' }], grid: [
+  { diff: 'superhard', moves: 28, colors: 4, goals: [{ type: 'stone' }, { type: 'crate' }, { type: 'chain' }], grid: [
     '........', '.666666.', '.6cccc6.', '.6c33c6.', '.6c33c6.', '.6cccc6.', '.666666.', '........'] },
 
   // ---------------------------------------------------------------- 21-25
   // 21 · relief: checker crates
-  { moves: 20, colors: 4, goals: [{ type: 'crate' }, { type: 'yellow', count: 30 }], grid: [
+  { moves: 17, colors: 4, goals: [{ type: 'crate' }, { type: 'yellow', count: 30 }], grid: [
     'x......x', '........', '2.2.2.2.', '.2.2.2.2', '2.2.2.2.', '.2.2.2.2', '........', 'x......x'] },
   // 22 · hourglass
-  { moves: 20, colors: 4, goals: [{ type: 'vines' }, { type: 'chain' }, { type: 'blue', count: 40 }], grid: [
+  { moves: 18, colors: 4, goals: [{ type: 'vines' }, { type: 'chain' }, { type: 'blue', count: 40 }], grid: [
     '........', 'x......x', 'xxc..cxx', 'xxx..xxx', 'xxx..xxx', 'xxc..cxx', 'x.v..v.x', 'vv....vv'] },
   // 23 · HARD: stone bars, 5 colors
-  { diff: 'hard', moves: 18, colors: 5, goals: [{ type: 'stone' }, { type: 'red', count: 20 }], grid: [
+  { diff: 'hard', moves: 20, colors: 5, goals: [{ type: 'stone' }, { type: 'red', count: 20 }], grid: [
     '........', '........', '555..555', '........', '........', '55.55.55', '........', '........'] },
   // 24 · relief: barrels + vines
   { moves: 15, colors: 4, goals: [{ type: 'vines' }, { type: 'red', count: 50 }], grid: [
     'vvv..vvv', 'vv....vv', 'v......v', 'v......v', '........', '...B....', '....B...', '........'] },
   // 25 · HARD: crown of crates (9x9)
-  { diff: 'hard', moves: 22, colors: 4, goals: [{ type: 'crate' }, { type: 'chain' }, { type: 'green', count: 30 }], grid: [
+  { diff: 'hard', moves: 23, colors: 4, goals: [{ type: 'crate' }, { type: 'chain' }, { type: 'green', count: 30 }], grid: [
     '.........', '.2..2..2.', '.22.2.22.', '.2222222.', '.3333333.', '.cc.c.cc.', '.........', '.........', 'x.......x'] },
 
   // ---------------------------------------------------------------- 26-30: finale
   // 26 · stone X, 5 colors
-  { moves: 28, colors: 5, goals: [{ type: 'red', count: 45 }, { type: 'blue', count: 45 }, { type: 'stone' }], grid: [
+  { moves: 26, colors: 5, goals: [{ type: 'red', count: 45 }, { type: 'blue', count: 45 }, { type: 'stone' }], grid: [
     '........', '........', '.4....4.', '..4..4..', '...44...', '..4..4..', '.4....4.', '........'] },
   // 27 · relief: open board with a crystal orb
   { moves: 15, colors: 4, goals: [{ type: 'crate' }, { type: 'yellow', count: 45 }], grid: [
     '........', '........', '...O....', '........', '........', '1......1', '11....11', '111..111'] },
   // 28 · towers
-  { moves: 40, colors: 4, goals: [{ type: 'crate' }, { type: 'stone' }, { type: 'vines' }], grid: [
+  { moves: 44, colors: 4, goals: [{ type: 'crate' }, { type: 'stone' }, { type: 'vines' }], grid: [
     'vv....vv', 'v.2..2.v', '..2..2..', '444..444', '........', '.3....3.', '.3....3.', '.333333.'] },
   // 29 · HARD: checkerboard of stone & crates
-  { diff: 'hard', moves: 19, colors: 4, goals: [{ type: 'crate' }, { type: 'stone' }, { type: 'red', count: 30 }], grid: [
+  { diff: 'hard', moves: 17, colors: 4, goals: [{ type: 'crate' }, { type: 'stone' }, { type: 'red', count: 30 }], grid: [
     '........', '.3.33.3.', '........', '5.5..5.5', '........', '........', '222..222', '22....22'] },
   // 30 · SUPER HARD: the king's vault
-  { diff: 'superhard', moves: 29, colors: 5, goals: [{ type: 'crate' }, { type: 'stone' }, { type: 'chain' }, { type: 'vines' }], grid: [
+  { diff: 'superhard', moves: 27, colors: 5, goals: [{ type: 'crate' }, { type: 'stone' }, { type: 'chain' }, { type: 'vines' }], grid: [
     'vvv...vvv', 'v.......v', '..22222..', '..2ccc2..', '..2cOc2..', '..2ccc2..', '..22222..', '.........', '555...555'] },
+
+  // ---------------------------------------------------------------- 31-40: treasure, portals, growing vines
+  // 31 · treasure intro
+  { moves: 19, colors: 4, items: 2, goals: [{ type: 'gold' }], grid: [
+    '...TT...', '........', '........', '........', '........', '........', '........', '........'] },
+  // 32 · portals intro
+  { moves: 15, colors: 4, portals: [[7, 0, 1, 4], [7, 1, 1, 5], [7, 2, 1, 6], [7, 3, 1, 7]], goals: [{ type: 'crate' }], grid: [
+    '....xxxx', '........', '........', '........', '........', '.....222', '....2222', '....1111'] },
+  // 33 · growing vines intro
+  { moves: 15, colors: 4, goals: [{ type: 'vines' }, { type: 'blue', count: 35 }], grid: [
+    '........', '........', '........', '........', '...gg...', '........', 'g......g', 'gg....gg'] },
+  // 34 · treasure + crates
+  { moves: 20, colors: 4, items: 1, goals: [{ type: 'gold' }, { type: 'crate' }], grid: [
+    '..T..T..', '........', '........', '........', '........', '1......1', '11....11', '111..111'] },
+  // 35 · HARD: growing vines + chains
+  { diff: 'hard', moves: 12, colors: 4, goals: [{ type: 'vines' }, { type: 'chain' }, { type: 'green', count: 40 }], grid: [
+    '........', '.cc..cc.', '........', '...gg...', '..gggg..', '........', 'cc....cc', 'gg....gg'] },
+  // 36 · treasure through portals
+  { moves: 16, colors: 4, items: 2, portals: [[7, 0, 1, 4], [7, 1, 1, 5], [7, 2, 1, 6], [7, 3, 1, 7]], goals: [{ type: 'gold' }, { type: 'crate' }], grid: [
+    '....xxxx', '.....TT.', '........', '........', '........', '........', '....2..2', '....2222'] },
+  // 37 · relief: orbs and treasure
+  { moves: 15, colors: 4, items: 2, goals: [{ type: 'gold' }, { type: 'green', count: 50 }], grid: [
+    '........', '..T..T..', '........', '...OO...', '........', '........', '........', '........'] },
+  // 38 · stone pillars + growing vines
+  { moves: 15, colors: 4, goals: [{ type: 'stone' }, { type: 'vines' }, { type: 'red', count: 35 }], grid: [
+    '........', '.4....4.', '.4.gg.4.', '.4....4.', '.4....4.', '........', 'g......g', 'gg....gg'] },
+  // 39 · deep treasure (9x9)
+  { moves: 20, colors: 4, items: 2, goals: [{ type: 'gold' }, { type: 'stone' }], grid: [
+    '...T.T...', '.........', '.........', '5.......5', '55.....55', '.........', '.........', '..55555..', 'x.......x'] },
+  // 40 · SUPER HARD: the royal treasury
+  { diff: 'superhard', moves: 13, colors: 4, items: 1, goals: [{ type: 'gold' }, { type: 'vines' }, { type: 'stone' }, { type: 'crate' }, { type: 'chain' }], grid: [
+    'g..TT..g', '........', '.cc..cc.', '...44...', '..4554..', '........', '2......2', '22g..g22'] },
 ];
 
 /** Deterministic pseudo-random generator for endless levels after the hand-made ones. */

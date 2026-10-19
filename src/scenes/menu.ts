@@ -3,14 +3,21 @@ import { getLevel } from '../levels';
 import { tex, COLOR_TEX } from '../assets';
 import { label, Button, iconButton, Counter, overlay } from '../ui';
 import { tween, Ease } from '../tween';
-import { getSave, save } from '../storage';
+import { getSave, save, DEV } from '../storage';
 import { updateMusic } from '../audio';
 import type { App } from '../main';
+import { dailyAvailable, questsClaimable, roadClaimable, streakBonus } from '../liveops';
+import { dailyPanel, questsPanel, roadPanel } from './panels';
+import { nextTaskCost } from './castle';
+
+let dailyShownThisSession = false;
 
 export class MenuScene extends Container {
   private floaters: { s: Container; base: number; ph: number; amp: number }[] = [];
   private t = 0;
   private playBtn: Button;
+  private falcon!: Sprite;
+  private sideButtons: { badge: Container; check: () => number }[] = [];
 
   constructor(private app: App, public W: number, public H: number) {
     super();
@@ -18,8 +25,8 @@ export class MenuScene extends Container {
 
     // floating decorative tiles
     const deco = [
-      { t: COLOR_TEX[0], x: 0.14, y: 0.42, s: 120, r: -0.25 },
-      { t: COLOR_TEX[1], x: 0.86, y: 0.45, s: 115, r: 0.2 },
+      { t: COLOR_TEX[0], x: 0.14, y: 0.5, s: 120, r: -0.25 },
+      { t: COLOR_TEX[1], x: 0.86, y: 0.52, s: 115, r: 0.2 },
       { t: COLOR_TEX[2], x: 0.18, y: 0.63, s: 100, r: 0.3 },
       { t: COLOR_TEX[4], x: 0.82, y: 0.64, s: 105, r: -0.2 },
       { t: 'pw_barrel', x: 0.16, y: 0.8, s: 95, r: 0.1 },
@@ -48,12 +55,11 @@ export class MenuScene extends Container {
     t2.position.set(W / 2, H * 0.29 + 108);
     this.addChild(t1, t2);
 
-    const falcon = new Sprite(tex('pw_falcon'));
-    falcon.anchor.set(0.5);
-    falcon.scale.set(170 / falcon.texture.width);
-    falcon.position.set(W / 2, H * 0.56);
-    this.addChild(falcon);
-    this.floaters.push({ s: falcon, base: falcon.y, ph: 1.3, amp: 14 });
+    this.falcon = new Sprite(tex('pw_falcon'));
+    this.falcon.anchor.set(0.5);
+    this.falcon.scale.set(150 / this.falcon.texture.width);
+    this.falcon.position.set(W / 2, H * 0.56);
+    this.addChild(this.falcon);
 
     // counters + settings
     const stars = new Counter('ui_star', s.stars, 160);
@@ -63,11 +69,38 @@ export class MenuScene extends Container {
     const gear = iconButton('ic_gear', 84, () => this.openSettings());
     gear.position.set(W - 64, 60);
     this.addChild(stars, coins, gear);
-    const lv = iconButton('ui_star', 84, () => this.app.showLevels());
-    lv.position.set(W - 64, 170);
-    const lvT = label('Seviyeler', 22);
-    lvT.position.set(W - 64, 226);
-    this.addChild(lv, lvT);
+
+    // side buttons (right: events, left: castle + levels)
+    const refresh = () => this.refreshBadges();
+    this.side(W - 86, 180, 'ic_heart', 'Günlük', () => dailyPanel(this, W, H, refresh), () => (dailyAvailable() ? 1 : 0));
+    this.side(W - 86, 310, 'ui_star', 'Görevler', () => questsPanel(this, W, H, refresh), () => questsClaimable());
+    this.side(W - 86, 440, 'ic_coin', 'Hazine Yolu', () => roadPanel(this, W, H, refresh), () => roadClaimable());
+    this.side(86, 180, 'tile_yellow', 'Kale', () => this.app.showCastle(), () => {
+      const c = nextTaskCost();
+      return c !== null && getSave().stars >= c ? 1 : 0;
+    });
+    this.side(86, 310, 'ic_lock', 'Seviyeler', () => this.app.showLevels(), () => 0);
+    this.refreshBadges();
+
+    // win streak indicator
+    const sb = streakBonus();
+    if (s.streak > 0) {
+      const box = new Container();
+      const bg = new Graphics().roundRect(-200, -32, 400, 64, 32).fill({ color: 0x2a1408, alpha: 0.85 }).stroke({ width: 3, color: 0xffa040 });
+      const t = label(`Galibiyet serisi: ${s.streak}`, 26, { fill: 0xffc070 });
+      t.x = -60;
+      box.addChild(bg, t);
+      ['pw_arrow', 'pw_barrel', 'pw_orb'].forEach((n, i) => {
+        const ic = new Sprite(tex(n));
+        ic.anchor.set(0.5);
+        ic.scale.set(46 / ic.texture.width);
+        ic.x = 95 + i * 46;
+        ic.alpha = i < sb.length ? 1 : 0.25;
+        box.addChild(ic);
+      });
+      box.position.set(W / 2, H * 0.735);
+      this.addChild(box);
+    }
 
     // play
     const diff = getLevel(s.level).diff ?? 'normal';
@@ -85,10 +118,43 @@ export class MenuScene extends Container {
       this.floaters.push({ s: tag, base: tag.y, ph: 0.5, amp: 4 });
       this.floaters.push({ s: tt, base: tt.y, ph: 0.5, amp: 4 });
     }
+    if (!dailyShownThisSession && dailyAvailable() && !DEV.on) {
+      dailyShownThisSession = true;
+      dailyPanel(this, W, H, () => this.refreshBadges());
+    }
+  }
+
+  private side(x: number, y: number, icon: string, text: string, onTap: () => void, check: () => number) {
+    const b = iconButton(icon, 92, onTap);
+    b.position.set(x, y);
+    const t = label(text, 21);
+    t.position.set(x, y + 60);
+    const badge = new Container();
+    badge.addChild(new Graphics().circle(0, 0, 17).fill({ color: 0xd62020 }).stroke({ width: 3, color: 0xffffff }));
+    badge.addChild(label('!', 22));
+    badge.position.set(x + 32, y - 30);
+    this.addChild(b, t, badge);
+    this.sideButtons.push({ badge, check });
+  }
+
+  refreshBadges() {
+    for (const b of this.sideButtons) b.badge.visible = b.check() > 0;
   }
 
   update(dt: number) {
     this.t += dt;
+    // falcon glides around in a lazy figure-eight
+    const f = this.falcon;
+    if (f && !f.destroyed) {
+      const k = this.t * 0.45;
+      const nx = this.W / 2 + Math.sin(k) * this.W * 0.3;
+      const ny = this.H * 0.56 + Math.sin(k * 2) * 40;
+      f.scale.x = (Math.cos(k) >= 0 ? 1 : -1) * (150 / f.texture.width) * (1 + Math.sin(this.t * 12) * 0.04);
+      f.scale.y = (150 / f.texture.width) * (1 - Math.sin(this.t * 12) * 0.03);
+      f.rotation = (nx - f.x) * 0.02;
+      f.position.set(nx, ny);
+    }
+    for (const b of this.sideButtons) if (b.badge.visible) b.badge.scale.set(1 + Math.sin(this.t * 5) * 0.12);
     for (const f of this.floaters) f.s.y = f.base + Math.sin(this.t * 1.6 + f.ph) * f.amp;
     const k = 1 + Math.sin(this.t * 4) * 0.035;
     this.playBtn.setBaseScale(k);
