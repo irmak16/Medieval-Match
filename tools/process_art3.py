@@ -18,7 +18,7 @@ for i in range(1, 7):
 for pose in ['wave', 'happy', 'sad', 'scared', 'build']:
     p = f'pip_{pose}.jpeg'
     if os.path.exists(os.path.join(RAW3, p)):
-        single(p, f'pip_{pose}', 420, holes=True, largest=False, square=False)
+        single(p, f'pip_{pose}', 420, holes=(pose != 'build'), largest=False, square=False)
 
 single('trophy.jpeg', 'trophy', 220, holes=True)
 # the pack has a soft grey shadow: use a looser tolerance
