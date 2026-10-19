@@ -282,8 +282,9 @@ export class CastleScene extends Container {
     this.stars.value = s.stars;
 
     // builder Pip pops up in the corner
-    if (hasPip('build')) {
-      this.pip = new Pip('build', 240);
+    const pose = hasPip('build') ? 'build' : hasPip('wave') ? 'wave' : null;
+    if (pose) {
+      this.pip = new Pip(pose, 240);
       this.pip.position.set(this.W - 100, this.H - 10);
       this.addChild(this.pip);
       this.pip.popIn();
