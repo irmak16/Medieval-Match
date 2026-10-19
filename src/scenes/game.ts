@@ -44,6 +44,7 @@ export class GameScene extends Container {
   private boardHolder = new Container();
   private playfield = new Container();
   private timeScale = 1;
+  private baseScale = 1;
   private hitStop = 0;
   private comboTxt!: Text;
   private comboTimer = 0;
@@ -490,6 +491,7 @@ export class GameScene extends Container {
 
   /** Hit-stop + small camera punch for big moments. */
   private impact(level: number) {
+    if (this.state !== 'play') return; // no slow-motion during the end-of-level bonus
     this.hitStop = 0.035 + level * 0.03;
     this.timeScale = 0.08;
     killTweens(this.playfield.scale);
@@ -609,7 +611,7 @@ export class GameScene extends Container {
   update(dt: number) {
     if (this.hitStop > 0) {
       this.hitStop -= dt;
-      if (this.hitStop <= 0) this.timeScale = 1;
+      if (this.hitStop <= 0) this.timeScale = this.baseScale;
     }
     this.board.update(dt * this.timeScale);
     this.uiFx.update(dt);
@@ -668,22 +670,37 @@ export class GameScene extends Container {
     await wait(0.3, 'ui');
     sfx.win();
     // "Kral Bonusu": remaining moves become arrows
-    const banner = label('Kraliyet Bonusu!', 64, { fill: 0xffe066, stroke: 0x7a2e00, strokeW: 10 });
+    const banner = label(this.moves > 0 ? `Kraliyet Bonusu!\n${this.moves} hamle = +${this.moves * 5} altın` : 'Kraliyet Bonusu!', this.moves > 0 ? 52 : 64, { fill: 0xffe066, stroke: 0x7a2e00, strokeW: 10 });
     banner.position.set(this.W / 2, this.board.y + (this.board.H * this.board.S) / 2);
     banner.scale.set(0);
     this.flyLayer.addChild(banner);
     await tween(banner.scale, { x: 1, y: 1 }, 0.4, Ease.outBack);
-    await wait(0.6, 'ui');
-    await tween(banner, { alpha: 0 }, 0.3);
+    await wait(0.9, 'ui');
+    await tween(banner, { alpha: 0 }, 0.25);
     banner.destroy();
+    const leftMoves = this.moves;
     if (this.moves > 0) {
+      // tap anywhere to skip the celebration
+      let skip = false;
+      const catcher = new Graphics().rect(0, 0, this.W, this.H).fill({ color: 0x000000, alpha: 0.001 });
+      catcher.eventMode = 'static';
+      catcher.on('pointerdown', () => (skip = true));
+      const hint = label('Geçmek için dokun', 26, { fill: 0xffffff });
+      hint.position.set(this.W / 2, this.board.y + this.board.H * this.board.S + 60);
+      hint.alpha = 0.8;
+      this.flyLayer.addChild(catcher, hint);
       const fromG = this.movesTxt.getGlobalPosition();
-      await this.board.runBonus(this.moves, fromG, () => this.useMove());
+      this.timeScale = this.baseScale = 1.5;
+      await this.board.runBonus(this.moves, fromG, () => this.useMove(), () => skip);
+      this.timeScale = this.baseScale = 1;
+      catcher.destroy();
+      hint.destroy();
     }
-    await wait(0.4, 'ui');
+    await wait(0.3, 'ui');
     const s = getSave();
     const diff = this.def.diff ?? 'normal';
-    const reward = (30 + Math.min(this.levelNo, 50) * 2) * (diff === 'superhard' ? 3 : diff === 'hard' ? 2 : 1);
+    const bonusCoins = leftMoves * 5; // every unused move is worth coins
+    const reward = (30 + Math.min(this.levelNo, 50) * 2) * (diff === 'superhard' ? 3 : diff === 'hard' ? 2 : 1) + bonusCoins;
     s.stars += 1;
     s.coins += reward;
     if (s.level <= this.levelNo) s.level = this.levelNo + 1;

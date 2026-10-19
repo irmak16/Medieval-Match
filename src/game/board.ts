@@ -1496,12 +1496,16 @@ export class Board extends Container {
 
   // ======================================================================= end-of-level bonus
   /** Convert n random tiles into arrows, then fire every power-up on the board. */
-  async runBonus(n: number, fromGlobal: Point, onEach: () => void): Promise<void> {
+  async runBonus(n: number, fromGlobal: Point, onEach: () => void, skipped: () => boolean = () => false): Promise<void> {
     this.inputEnabled = false;
     this.clearHint();
     const wait = (s: number) => new Promise<void>((res) => after(s, res, 'bonus'));
+    const t0 = performance.now();
+    const MAX_MS = 5000; // the celebration never runs longer than ~5 seconds
+    const over = () => skipped() || performance.now() - t0 > MAX_MS;
     const candidates = () => [...this.tiles].filter((t) => t.kind === 'c' && t.state === 'idle' && !this.grid[t.r][t.c].chain);
-    for (let i = 0; i < n; i++) {
+    // 1) remaining moves fly onto the board as arrows (quick, overlapping)
+    for (let i = 0; i < n && !over(); i++) {
       const list = candidates();
       if (!list.length) break;
       const t = list[rnd(list.length)];
@@ -1514,27 +1518,31 @@ export class Board extends Container {
       star.scale.set((this.S * 0.8) / 128);
       star.position.copyFrom(from);
       this.projLayer.addChild(star);
-      tween(star, { x: t.view.x, y: t.view.y }, 0.25, Ease.inQuad).then(() => {
+      tween(star, { x: t.view.x, y: t.view.y }, 0.22, Ease.inQuad).then(() => {
         star.destroy();
-        if (!this.tiles.has(t)) return;
+        if (!this.tiles.has(t) || t.kind !== 'c') return;
         this.setKind(t, Math.random() < 0.5 ? 'ah' : 'av', -1);
         sfx.powerCreate();
         this.fx.sparkleBurst(t.view.x, t.view.y, 6);
         t.view.scale.set(1.4);
         tween(t.view.scale, { x: 1, y: 1 }, 0.2, Ease.outBack);
       });
-      await wait(0.09);
+      await wait(n > 10 ? 0.04 : 0.07);
     }
-    await wait(0.4);
-    for (let guard = 0; guard < 200; guard++) {
-      while (!this.isStable()) await wait(0.05);
-      const p = [...this.tiles].find((t) => t.isPower && t.state === 'idle' && !this.grid[t.r][t.c].chain);
-      if (!p) break;
+    await wait(0.3);
+    // 2) fire every power-up on the board in quick waves (not one by one)
+    for (let wave = 0; wave < 6 && !over(); wave++) {
+      const powers = [...this.tiles].filter((t) => t.isPower && t.state === 'idle' && !this.grid[t.r][t.c].chain);
+      if (!powers.length) break;
       this.cascade = 0;
-      this.activate(p);
-      await wait(0.1);
+      powers.forEach((p, i) => after(i * 0.05, () => {
+        if (!over() && this.tiles.has(p) && p.state === 'idle') this.activate(p);
+      }, 'bonus'));
+      await wait(powers.length * 0.05 + 0.15);
+      while (!this.isStable() && !over()) await wait(0.05);
     }
-    while (!this.isStable()) await wait(0.05);
+    // 3) let the board settle (bounded)
+    for (let i = 0; i < 60 && !this.isStable(); i++) await wait(0.05);
   }
 
   /** In-game boosters (no move is spent). */
