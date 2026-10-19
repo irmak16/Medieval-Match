@@ -80,7 +80,10 @@ export class GameScene extends Container {
       const count = gd.count ?? this.countInGrid(gd.type);
       const node = new Container();
       node.position.set(12 + 20 + (goalArea - 20 - n * gw) / 2 + gw * (i + 0.5), hudY + hudH / 2 + 4);
-      const icon = new Sprite(gd.type === 'gold' ? texOr('it_chest', 'ic_coin') : tex(GOAL_TEX[gd.type]));
+      const onlyGrow = gd.type === 'vines' && this.def.grid.some((r) => r.includes('g')) && !this.def.grid.some((r) => r.includes('v'));
+      const icon = new Sprite(
+        gd.type === 'gold' ? texOr('it_chest', 'ic_coin') : onlyGrow ? texOr('ob_vines_grow', 'ob_vines') : tex(GOAL_TEX[gd.type]),
+      );
       icon.anchor.set(0.5);
       icon.scale.set(Math.min(74, gw - 10) / icon.texture.width);
       icon.y = -14;

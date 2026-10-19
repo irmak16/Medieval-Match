@@ -30,10 +30,13 @@ export async function loadOptional(): Promise<void> {
   await Promise.all(
     OPTIONAL.map(async (n) => {
       try {
-        const res = await fetch(`assets/${n}.png`, { method: 'HEAD' });
-        if (!res.ok || !(res.headers.get('content-type') || '').includes('image')) return;
-        await Assets.load({ alias: n, src: `assets/${n}.png` });
-        loadedOptional.add(n);
+        for (const ext of n.startsWith('castle_') ? ['jpg', 'png'] : ['png']) {
+          const res = await fetch(`assets/${n}.${ext}`, { method: 'HEAD' });
+          if (!res.ok || !(res.headers.get('content-type') || '').includes('image')) continue;
+          await Assets.load({ alias: n, src: `assets/${n}.${ext}` });
+          loadedOptional.add(n);
+          return;
+        }
       } catch {
         /* not available yet */
       }
