@@ -146,3 +146,11 @@ export function updateTweens(dt: number): void {
   }
   for (let i = timers.length - 1; i >= 0; i--) if (timers[i].dead) timers.splice(i, 1);
 }
+
+/** Fade an object out while moving it up, then destroy it (safe if it was already destroyed). */
+export function fadeUpAndDestroy(obj: any, dy: number, dur: number, delay = 0): Promise<void> {
+  if (!obj || obj.destroyed) return Promise.resolve();
+  return tween(obj, { alpha: 0, y: obj.y - dy }, dur, Ease.inQuad, delay).then(() => {
+    if (!obj.destroyed) obj.destroy({ children: true });
+  });
+}

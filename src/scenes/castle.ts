@@ -3,7 +3,7 @@
 import { ColorMatrixFilter, Container, Graphics, RenderTexture, Sprite, Texture, Point } from 'pixi.js';
 import { tex, hasTex } from '../assets';
 import { label, Button, Counter } from '../ui';
-import { tween, Ease, wait } from '../tween';
+import { tween, Ease, wait, fadeUpAndDestroy } from '../tween';
 import { sfx } from '../audio';
 import { getSave, save } from '../storage';
 import { grant, rewardText, Reward } from '../liveops';
@@ -272,7 +272,7 @@ export class CastleScene extends Container {
       const m = label('Seviye geçerek yıldız kazan!', 30, { fill: 0xff9a8a });
       m.position.set(row.x, row.y - 50);
       this.addChild(m);
-      tween(m, { alpha: 0, y: m.y - 40 }, 0.9, Ease.inQuad, 0.6).then(() => m.destroy());
+      fadeUpAndDestroy(m, 40, 0.9, 0.6);
       return;
     }
     this.busy = true;
@@ -352,7 +352,7 @@ export class CastleScene extends Container {
     ok.position.set(this.W / 2, Math.max(this.picY + 60, fg.y - 40));
     ok.scale.set(0.3);
     this.addChild(ok);
-    tween(ok.scale, { x: 1, y: 1 }, 0.35, Ease.outBack).then(() => tween(ok, { alpha: 0, y: ok.y - 60 }, 0.5, Ease.inQuad, 0.6).then(() => ok.destroy()));
+    tween(ok.scale, { x: 1, y: 1 }, 0.35, Ease.outBack).then(() => fadeUpAndDestroy(ok, 60, 0.5, 0.6));
     this.pip?.setPose('happy');
     await wait(0.6, 'castle');
     if (this.destroyed) return;

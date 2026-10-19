@@ -8,7 +8,7 @@ import { getLevel, GoalType, LevelDef } from '../levels';
 import { tex, hasTex, texOr, iceTex } from '../assets';
 const gtex = (n: string) => (n === '__ice' ? iceTex(2) : tex(n));
 import { label, woodPanel, Button, iconButton, overlay } from '../ui';
-import { tween, Ease, wait, clearTimers, after, killTweens } from '../tween';
+import { tween, Ease, wait, clearTimers, after, killTweens, fadeUpAndDestroy } from '../tween';
 import { sfx, updateMusic, setMusicIntensity } from '../audio';
 import { getSave, save, DEV, firstTime } from '../storage';
 import type { App } from '../main';
@@ -656,9 +656,7 @@ export class GameScene extends Container {
     t.scale.set(0.2);
     this.flyLayer.addChild(t);
     sfx.star();
-    tween(t.scale, { x: 1, y: 1 }, 0.35, Ease.outBack).then(() =>
-      tween(t, { alpha: 0, y: t.y - 80 }, 0.45, Ease.inQuad, 0.35).then(() => t.destroy()),
-    );
+    tween(t.scale, { x: 1, y: 1 }, 0.35, Ease.outBack).then(() => fadeUpAndDestroy(t, 80, 0.45, 0.35));
   }
 
   private async waitStable() {

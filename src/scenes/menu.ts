@@ -2,7 +2,7 @@ import { Container, Graphics, Sprite } from 'pixi.js';
 import { getLevel } from '../levels';
 import { tex, COLOR_TEX } from '../assets';
 import { label, Button, iconButton, Counter, overlay } from '../ui';
-import { tween, Ease } from '../tween';
+import { tween, Ease, fadeUpAndDestroy } from '../tween';
 import { getSave, save, DEV } from '../storage';
 import { updateMusic } from '../audio';
 import type { App } from '../main';
@@ -175,7 +175,7 @@ export class MenuScene extends Container {
     t.position.set(this.W / 2, this.H * 0.47);
     if (t.width > this.W - 40) t.scale.set((this.W - 40) / t.width);
     this.addChild(t);
-    tween(t, { alpha: 0, y: t.y - 50 }, 0.8, Ease.inQuad, 1.4).then(() => t.destroy());
+    fadeUpAndDestroy(t, 50, 0.8, 1.4);
   }
 
   private livesPanel() {
