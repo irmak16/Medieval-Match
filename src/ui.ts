@@ -106,7 +106,7 @@ export function overlay(w: number, h: number, alpha = 0.55): Graphics {
 
 /** Counter pill: icon + number on a dark rounded background. */
 export class Counter extends Container {
-  private txt: Text;
+  txt: Text;
   constructor(icon: string, value: number, w = 150) {
     super();
     const bg = new Graphics().roundRect(-w / 2 + 18, -24, w - 18, 48, 24).fill({ color: 0x2a160a, alpha: 0.82 }).stroke({ width: 3, color: 0xc89a3c });

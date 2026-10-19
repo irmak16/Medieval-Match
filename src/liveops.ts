@@ -1,7 +1,7 @@
 // Live-ops style systems that work offline: daily reward, daily quests, weekly treasure road, win streak.
 import { getSave, save } from './storage';
 
-export type Reward = { coins?: number; hammer?: number; row?: number; col?: number; shuffle?: number };
+export type Reward = { coins?: number; hammer?: number; row?: number; col?: number; shuffle?: number; packs?: number };
 
 function pad(n: number) {
   return n < 10 ? '0' + n : String(n);
@@ -26,6 +26,7 @@ export function grant(r: Reward) {
   s.inv.row += r.row ?? 0;
   s.inv.col += r.col ?? 0;
   s.inv.shuffle += r.shuffle ?? 0;
+  s.album.packs += r.packs ?? 0;
   save();
 }
 
@@ -36,6 +37,7 @@ export function rewardText(r: Reward): string {
   if (r.row) parts.push(`${r.row} okçu`);
   if (r.col) parts.push(`${r.col} mancınık`);
   if (r.shuffle) parts.push(`${r.shuffle} soytarı`);
+  if (r.packs) parts.push(`${r.packs} kart paketi`);
   return parts.join(' + ');
 }
 
@@ -47,7 +49,7 @@ export const DAILY: Reward[] = [
   { row: 1, col: 1 },
   { coins: 150 },
   { shuffle: 1, coins: 50 },
-  { coins: 250, hammer: 2 },
+  { coins: 250, hammer: 2, packs: 1 },
 ];
 
 export function dailyAvailable(): boolean {
@@ -132,9 +134,9 @@ export const ROAD: { at: number; reward: Reward }[] = [
   { at: 9, reward: { coins: 100 } },
   { at: 14, reward: { row: 1, col: 1 } },
   { at: 20, reward: { coins: 200 } },
-  { at: 28, reward: { shuffle: 1, hammer: 1 } },
+  { at: 28, reward: { shuffle: 1, hammer: 1, packs: 1 } },
   { at: 38, reward: { coins: 350 } },
-  { at: 50, reward: { coins: 500, hammer: 2, row: 1, col: 1 } },
+  { at: 50, reward: { coins: 500, hammer: 2, row: 1, col: 1, packs: 2 } },
 ];
 
 export function road() {
@@ -166,4 +168,127 @@ export function streakBonus(): ('ah' | 'barrel' | 'orb')[] {
   if (k >= 2) out.push('barrel');
   if (k >= 3) out.push('orb');
   return out;
+}
+
+// ------------------------------------------------------------------ weekly tournament (Kraliyet Kupası) vs bots
+const BOT_NAMES = [
+  'Sir Kaan', 'Leydi Elif', 'Baron Efe', 'Kont Mert', 'Düşes Ece', 'Şövalye Can', 'Okçu Deniz', 'Prens Arda',
+  'Prenses Zeynep', 'Lord Emir', 'Bilge Ayla', 'Demirci Ali', 'Ozan Burak', 'Leydi Defne', 'Muhafız Kerem',
+  'Simyacı Nil', 'Kaptan Selim', 'Avcı Yağmur', 'Rahip Onur',
+];
+
+function hash(str: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+
+/** Fraction of the current week that has passed (Mon 00:00 -> Sun 24:00). */
+function weekProgress(d = new Date()): number {
+  const day = (d.getDay() + 6) % 7;
+  return Math.min(1, (day * 24 + d.getHours() + d.getMinutes() / 60) / (7 * 24));
+}
+
+function botScores(week: string, progress: number): { name: string; score: number }[] {
+  return BOT_NAMES.map((name, i) => {
+    const h = hash(week + name);
+    const skill = 12 + (h % 70) + (i < 3 ? 25 : 0); // final weekly score
+    const curve = Math.pow(progress, 0.8 + ((h >> 8) % 40) / 100);
+    const wobble = ((h >> 4) % 7) / 100;
+    return { name, score: Math.floor(skill * Math.min(1, curve + wobble * progress)) };
+  });
+}
+
+export function cup() {
+  const s = getSave();
+  const wk = weekKey();
+  if (s.cup.week !== wk) {
+    // settle last week's result
+    if (s.cup.week && s.cup.score > 0) {
+      const rank = cupRank(s.cup.week, s.cup.score, 1);
+      const reward = cupReward(rank);
+      if (reward) (s.cup as any).pending = { rank, reward };
+    }
+    s.cup.week = wk;
+    s.cup.score = 0;
+    save();
+  }
+  return s.cup as typeof s.cup & { pending?: { rank: number; reward: Reward & { packs?: number } } };
+}
+
+export function cupRank(week: string, score: number, progress: number): number {
+  return botScores(week, progress).filter((b) => b.score > score).length + 1;
+}
+
+export function cupBoard(): { name: string; score: number; me?: boolean }[] {
+  const c = cup();
+  const list: { name: string; score: number; me?: boolean }[] = botScores(c.week, weekProgress());
+  list.push({ name: 'Sen', score: c.score, me: true });
+  list.sort((a, b) => b.score - a.score || (a.me ? -1 : 1));
+  return list;
+}
+
+export function cupReward(rank: number): (Reward & { packs?: number }) | null {
+  if (rank === 1) return { coins: 1000, hammer: 2, packs: 2 };
+  if (rank === 2) return { coins: 600, packs: 1, hammer: 1 };
+  if (rank === 3) return { coins: 400, packs: 1 };
+  if (rank <= 10) return { coins: 150 };
+  return null;
+}
+
+export function addCupPoints(n: number) {
+  cup().score += n;
+  save();
+}
+
+export function cupTimeLeft(): string {
+  const p = 1 - weekProgress();
+  const hours = Math.floor(p * 7 * 24);
+  return hours >= 24 ? `${Math.floor(hours / 24)} gün ${hours % 24} sa` : `${hours} sa`;
+}
+
+// ------------------------------------------------------------------ lives (5 hearts, one refills every 20 minutes)
+export const MAX_LIVES = 5;
+const REGEN_MS = 20 * 60 * 1000;
+export const REFILL_COST = 250;
+
+export function lives(): number {
+  const s = getSave();
+  const l = s.lives;
+  if (l.n >= MAX_LIVES) return l.n;
+  const now = Date.now();
+  if (!l.t) l.t = now;
+  const gained = Math.floor((now - l.t) / REGEN_MS);
+  if (gained > 0) {
+    l.n = Math.min(MAX_LIVES, l.n + gained);
+    l.t = l.n >= MAX_LIVES ? 0 : l.t + gained * REGEN_MS;
+    save();
+  }
+  return l.n;
+}
+
+/** "mm:ss" until the next life, or '' when full. */
+export function nextLifeIn(): string {
+  const l = getSave().lives;
+  if (lives() >= MAX_LIVES) return '';
+  const ms = Math.max(0, REGEN_MS - (Date.now() - l.t));
+  const m = Math.floor(ms / 60000), sec = Math.floor((ms % 60000) / 1000);
+  return `${m}:${sec < 10 ? '0' : ''}${sec}`;
+}
+
+export function loseLife() {
+  const l = getSave().lives;
+  lives();
+  if (l.n >= MAX_LIVES) l.t = Date.now();
+  l.n = Math.max(0, l.n - 1);
+  save();
+}
+
+export function refillLives(): boolean {
+  const s = getSave();
+  if (s.coins < REFILL_COST) return false;
+  s.coins -= REFILL_COST;
+  s.lives = { n: MAX_LIVES, t: 0 };
+  save();
+  return true;
 }

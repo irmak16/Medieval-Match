@@ -1,6 +1,9 @@
 import { Container, Graphics, NineSliceSprite, Point, Sprite, Text } from 'pixi.js';
 import { Board, Kind, BoosterKind } from '../game/board';
-import { trackQuest, addRoadPoints, streakBonus } from '../liveops';
+import { trackQuest, addRoadPoints, streakBonus, addCupPoints, loseLife } from '../liveops';
+import { addPacks } from '../album';
+import { Pip, hasPip } from '../mascot';
+import { FX } from '../fx';
 import { getLevel, GoalType, LevelDef } from '../levels';
 import { tex, hasTex, texOr } from '../assets';
 import { label, woodPanel, Button, iconButton, overlay } from '../ui';
@@ -46,6 +49,11 @@ export class GameScene extends Container {
   private lowMoves = false;
   private boosterBtns: { k: BoosterKind; node: Container; badge: Text; ring: Graphics }[] = [];
   private boosterHint: Container | null = null;
+  private uiFx!: FX;
+  private uiFxLayer = new Container();
+  private uiFxAdd = new Container();
+  private pips: Pip[] = [];
+  private scaredShown = false;
 
   constructor(private app: App, public levelNo: number, public W: number, public H: number) {
     super();
@@ -192,7 +200,9 @@ export class GameScene extends Container {
     this.refreshBoosters();
     this.board.onBoosterUsed = (k) => this.boosterConsumed(k);
 
-    this.addChild(this.flyLayer, this.popupLayer);
+    this.addChild(this.flyLayer, this.popupLayer, this.uiFxLayer, this.uiFxAdd);
+    this.uiFx = new FX(this.uiFxLayer, this.uiFxAdd, 80);
+    this.dropIn();
     this.intro();
   }
 
@@ -427,6 +437,27 @@ export class GameScene extends Container {
     );
   }
 
+  /** Tiles rain into the board in a wave at level start (they really fall, with the board's gravity). */
+  private dropIn() {
+    const b = this.board;
+    for (const t of b.tiles) {
+      t.y = t.r - (b.H + 1) - t.c * 0.45;
+      t.vy = 0;
+      t.state = 'fall';
+    }
+  }
+
+  /** Pip peeks in from the side of the screen with a pose (if the mascot art exists). */
+  private peekPip(pose: 'happy' | 'sad' | 'scared', parent: Container, x: number, y: number, size: number): Pip | null {
+    if (!hasPip(pose)) return null;
+    const p = new Pip(pose, size);
+    p.position.set(x, y);
+    parent.addChild(p);
+    p.popIn();
+    this.pips.push(p);
+    return p;
+  }
+
   private useMove() {
     this.moves = Math.max(0, this.moves - 1);
     this.movesTxt.text = String(this.moves);
@@ -441,6 +472,11 @@ export class GameScene extends Container {
         this.lowMoves = true;
         setMusicIntensity(true);
         this.praise('Son 5 hamle!', 0xff8a7a);
+        if (!this.scaredShown) {
+          this.scaredShown = true;
+          const p = this.peekPip('scared', this.flyLayer, this.W - 70, this.H - 10, 170);
+          if (p) after(2.2, () => tween(p, { y: this.H + 200 }, 0.4, Ease.inBack).then(() => p.destroy()), 'ui');
+        }
       }
     }
   }
@@ -569,6 +605,8 @@ export class GameScene extends Container {
       if (this.hitStop <= 0) this.timeScale = 1;
     }
     this.board.update(dt * this.timeScale);
+    this.uiFx.update(dt);
+    for (const p of this.pips) if (!p.destroyed) p.update(dt);
     if (this.comboTimer > 0) {
       this.comboTimer -= dt;
       if (this.comboTimer <= 0) tween(this.comboTxt, { alpha: 0 }, 0.3);
@@ -647,9 +685,15 @@ export class GameScene extends Container {
     s.best = Math.max(s.best, this.levelNo);
     s.streak += 1;
     trackQuest('win');
-    addRoadPoints(diff === 'superhard' ? 3 : diff === 'hard' ? 2 : 1);
+    const pts = diff === 'superhard' ? 3 : diff === 'hard' ? 2 : 1;
+    addRoadPoints(pts);
+    addCupPoints(pts);
+    const packChance = diff === 'superhard' ? 1 : diff === 'hard' ? 0.6 : 0.25;
+    const gotPack = Math.random() < packChance;
+    if (gotPack) addPacks(1);
     save();
-    this.showWinPopup(reward);
+    this.uiFx.confetti(this.W / 2, -20, this.W, 120);
+    this.showWinPopup(reward, gotPack);
   }
 
   private popup(title: string, h = 760): { root: Container; panel: Container; ph: number } {
@@ -676,8 +720,9 @@ export class GameScene extends Container {
     return { root, panel, ph };
   }
 
-  private showWinPopup(reward: number) {
+  private showWinPopup(reward: number, gotPack = false) {
     const { panel, ph } = this.popup('Tebrikler!');
+    this.peekPip('happy', panel, -ph * 0.36, ph * 0.08, 200);
     const star = new Sprite(tex('ui_star'));
     star.anchor.set(0.5);
     star.scale.set(0);
@@ -702,6 +747,11 @@ export class GameScene extends Container {
     const ct = label(`+${reward}`, 44, { fill: 0xffe066 });
     ct.position.set(30, ph * 0.17);
     panel.addChild(coin, ct);
+    if (gotPack) {
+      const pk = label('+1 kart paketi!', 26, { fill: 0x2f7a1a, stroke: 0xfff2d0, strokeW: 4, shadow: false });
+      pk.y = ph * 0.245;
+      panel.addChild(pk);
+    }
     after(0.6, () => sfx.coin());
     const b = new Button('green', 280, 'Devam', () => this.app.showMenu());
     b.y = ph * 0.33;
@@ -711,6 +761,7 @@ export class GameScene extends Container {
   private onOutOfMoves() {
     sfx.lose();
     const { root, panel, ph } = this.popup('Hamle Bitti!');
+    this.peekPip('sad', panel, -ph * 0.36, ph * 0.1, 170);
     const t = label('Biraz daha hamle ister misin?', 30, { fill: 0x5a2e0e, stroke: 0xfff2d0, strokeW: 4, shadow: false });
     t.y = -ph * 0.25;
     panel.addChild(t);
@@ -755,6 +806,7 @@ export class GameScene extends Container {
     }
     const quit = new Button('red', 260, 'Pes Et', () => {
       getSave().streak = 0;
+      loseLife();
       save();
       this.app.showMenu();
     }, 34);
@@ -793,6 +845,7 @@ export class GameScene extends Container {
     const quit = new Button('red', 280, 'Ana Menü', () => {
       if (this.moves < this.def.moves) {
         getSave().streak = 0; // leaving a started level breaks the streak
+        loseLife();
         save();
       }
       this.app.showMenu();
@@ -803,6 +856,7 @@ export class GameScene extends Container {
 
   destroyScene() {
     clearTimers('ui');
+    this.uiFx.clear();
     setMusicIntensity(false);
     this.board.destroyBoard();
     this.destroy({ children: true });

@@ -301,6 +301,10 @@ function musicTick() {
 }
 
 export function updateMusic(): void {
+  if (recordedMusic()) {
+    updateRecordedMusic();
+    return;
+  }
   const want = getSave().music && !!ctx;
   if (want && musicTimer === null) {
     musicTick();
@@ -309,4 +313,79 @@ export function updateMusic(): void {
     clearInterval(musicTimer);
     musicTimer = null;
   }
+}
+
+// ------------------------------------------------------------------ optional recorded sounds & music
+// public/audio/audio.json maps a sound name (same keys as `sfx`, plus "music") to one or more files.
+// Any sound listed there replaces the synthesized one; everything else stays procedural.
+const samples: Record<string, AudioBuffer[]> = {};
+let musicEl: HTMLAudioElement | null = null;
+let musicFiles: string[] = [];
+
+export async function loadRecordedAudio(): Promise<void> {
+  let map: Record<string, string[]> = {};
+  try {
+    const res = await fetch('audio/audio.json', { cache: 'no-cache' });
+    if (!res.ok) return;
+    map = await res.json();
+  } catch {
+    return;
+  }
+  musicFiles = map.music ?? [];
+  const c = ensure();
+  if (!c) return;
+  await Promise.all(
+    Object.entries(map).filter(([k]) => k !== 'music').map(async ([k, files]) => {
+      const bufs: AudioBuffer[] = [];
+      for (const f of files) {
+        try {
+          const ab = await (await fetch(`audio/${f}`)).arrayBuffer();
+          bufs.push(await c.decodeAudioData(ab));
+        } catch {
+          /* skip broken file */
+        }
+      }
+      if (bufs.length) samples[k] = bufs;
+    }),
+  );
+  // wrap every sfx so a recorded sample takes priority
+  for (const key of Object.keys(sfx) as (keyof typeof sfx)[]) {
+    const synth = sfx[key] as (...a: any[]) => void;
+    if (!samples[key]) continue;
+    (sfx as any)[key] = (...args: any[]) => {
+      if (!playSample(key, key === 'match' ? Math.min(1.6, 1 + (args[0] ?? 0) * 0.06) : 1)) synth(...args);
+    };
+  }
+}
+
+function playSample(key: string, rate = 1): boolean {
+  const list = samples[key];
+  if (!list || !on()) return false;
+  if (!throttle('s_' + key, 35)) return true;
+  const c = ctx!;
+  const src = c.createBufferSource();
+  src.buffer = list[Math.floor(Math.random() * list.length)];
+  src.playbackRate.value = rate * (0.96 + Math.random() * 0.08);
+  const g = c.createGain();
+  g.gain.value = 0.8;
+  src.connect(g).connect(sfxBus);
+  src.start();
+  return true;
+}
+
+/** Recorded background music (if provided) replaces the generative lute. */
+export function recordedMusic(): boolean {
+  return musicFiles.length > 0;
+}
+
+export function updateRecordedMusic(): void {
+  const want = getSave().music;
+  if (!musicFiles.length) return;
+  if (!musicEl) {
+    musicEl = new Audio(`audio/${musicFiles[Math.floor(Math.random() * musicFiles.length)]}`);
+    musicEl.loop = true;
+    musicEl.volume = 0.35;
+  }
+  if (want) musicEl.play().catch(() => {});
+  else musicEl.pause();
 }

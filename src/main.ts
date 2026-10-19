@@ -5,11 +5,13 @@ import { Application, Container, Sprite } from 'pixi.js';
 import { loadAssets, loadOptional, tex } from './assets';
 import { updateTweens } from './tween';
 import { loadSave } from './storage';
-import { unlockAudio } from './audio';
+import { unlockAudio, loadRecordedAudio } from './audio';
 import { MenuScene } from './scenes/menu';
 import { GameScene } from './scenes/game';
 import { LevelsScene } from './scenes/levels';
 import { CastleScene } from './scenes/castle';
+import { AlbumScene } from './scenes/albumScene';
+import { RescueScene } from './scenes/rescue';
 
 const DESIGN_W = 720;
 const MIN_H = 1150;
@@ -18,7 +20,7 @@ export class App {
   pixi = new Application();
   bg!: Sprite;
   root = new Container();
-  scene: MenuScene | GameScene | LevelsScene | CastleScene | null = null;
+  scene: MenuScene | GameScene | LevelsScene | CastleScene | AlbumScene | RescueScene | null = null;
   sceneH = 1280;
 
   async start() {
@@ -45,6 +47,7 @@ export class App {
       if (loader) loader.textContent = `Yükleniyor… %${Math.round(p * 100)}`;
     });
     await loadOptional();
+    loadRecordedAudio();
     document.getElementById('loader')?.remove();
 
     this.bg = new Sprite(tex('bg_game'));
@@ -88,7 +91,7 @@ export class App {
     this.bg.position.set(sw / 2, sh / 2);
   }
 
-  private setScene(make: (h: number) => MenuScene | GameScene | LevelsScene | CastleScene) {
+  private setScene(make: (h: number) => MenuScene | GameScene | LevelsScene | CastleScene | AlbumScene | RescueScene) {
     if (this.scene) this.scene.destroyScene();
     const { h } = this.metrics();
     this.sceneH = Math.min(h, 1600);
@@ -110,6 +113,14 @@ export class App {
 
   showCastle() {
     this.setScene((h) => new CastleScene(this, DESIGN_W, h));
+  }
+
+  showAlbum() {
+    this.setScene((h) => new AlbumScene(this, DESIGN_W, h));
+  }
+
+  showRescue() {
+    this.setScene((h) => new RescueScene(this, DESIGN_W, h));
   }
 
   showLevels() {

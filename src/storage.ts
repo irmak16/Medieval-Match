@@ -12,6 +12,10 @@ export interface SaveData {
   quests: { date: string; list: { key: string; target: number; progress: number; reward: number; claimed: boolean }[] };
   road: { week: string; points: number; claimed: number[] };
   castle: { done: string[] };
+  album: { cards: Record<string, number>; packs: number; sets: string[] };
+  cup: { week: string; score: number; claimed: string[] };
+  lives: { n: number; t: number }; // current lives and timestamp when the next one started regenerating
+  rescue: { done: number; nextAt: number }; // Pip rescue mini-game progress
 }
 
 const KEY = 'medieval-match-save-v1';
@@ -22,6 +26,10 @@ const DEFAULTS: SaveData = {
   quests: { date: '', list: [] },
   road: { week: '', points: 0, claimed: [] },
   castle: { done: [] },
+  album: { cards: {}, packs: 1, sets: [] },
+  cup: { week: '', score: 0, claimed: [] },
+  lives: { n: 5, t: 0 },
+  rescue: { done: 0, nextAt: 6 },
 };
 
 let data: SaveData = structuredClone(DEFAULTS);
@@ -34,6 +42,8 @@ export function loadSave(): SaveData {
     if (raw) data = { ...structuredClone(DEFAULTS), ...JSON.parse(raw) };
     else data = structuredClone(DEFAULTS);
     data.inv = { ...DEFAULTS.inv, ...data.inv };
+    data.album = { ...structuredClone(DEFAULTS.album), ...data.album };
+    data.lives = { ...DEFAULTS.lives, ...data.lives };
     if (!Array.isArray(data.seen)) data.seen = [];
     data.best = Math.max(data.best ?? 0, data.level - 1);
   } catch {
@@ -70,4 +80,24 @@ export function firstTime(key: string): boolean {
   data.seen.push(key);
   save();
   return true;
+}
+
+/** Export the whole save as a short text code (for moving progress between devices). */
+export function exportCode(): string {
+  const json = JSON.stringify(data);
+  return 'MM1-' + btoa(unescape(encodeURIComponent(json)));
+}
+
+export function importCode(code: string): boolean {
+  try {
+    const c = code.trim();
+    if (!c.startsWith('MM1-')) return false;
+    const parsed = JSON.parse(decodeURIComponent(escape(atob(c.slice(4)))));
+    if (typeof parsed.level !== 'number') return false;
+    data = { ...structuredClone(DEFAULTS), ...parsed };
+    save();
+    return true;
+  } catch {
+    return false;
+  }
 }

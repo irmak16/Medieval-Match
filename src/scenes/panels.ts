@@ -8,6 +8,7 @@ import {
   DAILY, dailyAvailable, dailyIndex, claimDaily, quests, questText, ROAD, road, grant, rewardText, Reward,
 } from '../liveops';
 import { getSave, save } from '../storage';
+import { cup, cupBoard, cupReward, cupTimeLeft } from '../liveops';
 
 export interface PopupParts { root: Container; panel: Container; ph: number; pw: number; close: () => void }
 
@@ -211,4 +212,61 @@ export function roadPanel(parent: Container, W: number, H: number, onChange: () 
   draw();
   void close;
   void getSave;
+}
+
+// ------------------------------------------------------------------ weekly tournament
+export function cupPanel(parent: Container, W: number, H: number, onChange: () => void) {
+  const { panel, ph, pw, close } = popup(parent, W, H, 'Kraliyet Kupası', onChange);
+  const c = cup();
+  if (c.pending) {
+    const pend = c.pending;
+    const t = label(`Geçen hafta ${pend.rank}. oldun!`, 32, INK);
+    t.y = -ph * 0.2;
+    const r = label(`Ödül: ${rewardText(pend.reward)}`, 24, { fill: 0x2f7a1a, stroke: 0xfff2d0, strokeW: 4, shadow: false });
+    r.y = -ph * 0.08;
+    const trophy = safeIcon(hasTex('trophy') ? 'trophy' : 'ui_star', 150);
+    trophy.y = -ph * 0.32 + 10;
+    const b = new Button('green', 260, 'Topla', () => {
+      grant(pend.reward);
+      delete (c as any).pending;
+      save();
+      sfx.coin();
+      close();
+      cupPanel(parent, W, H, onChange);
+    }, 38);
+    b.y = ph * 0.2;
+    panel.addChild(trophy, t, r, b);
+    return;
+  }
+  const head = label(`Bitime: ${cupTimeLeft()}`, 24, INK);
+  head.y = -ph * 0.33;
+  const sub = label('Seviye geç: +1 · Zor: +2 · Çok Zor: +3', 19, INK);
+  sub.y = -ph * 0.295;
+  panel.addChild(head, sub);
+  const board = cupBoard();
+  const meIdx = board.findIndex((b) => b.me);
+  // show top 7 + the player's row
+  const rows = board.slice(0, 7).map((b, i) => ({ ...b, rank: i + 1 }));
+  if (meIdx >= 7) rows.push({ ...board[meIdx], rank: meIdx + 1 });
+  rows.forEach((b, i) => {
+    const row = new Container();
+    row.y = -ph * 0.22 + i * 60;
+    const bg = new Graphics().roundRect(-pw * 0.4, -25, pw * 0.8, 50, 14).fill({ color: b.me ? 0x2f6a1a : 0x3b2210, alpha: 0.9 }).stroke({ width: b.me ? 3 : 0, color: 0x9fe08a });
+    const medal = b.rank <= 3 ? [0xffd23a, 0xd8d8e0, 0xd08a4a][b.rank - 1] : 0x6a5040;
+    const rk = new Graphics().circle(-pw * 0.34, 0, 19).fill({ color: medal });
+    const rt = label(String(b.rank), 20, { stroke: 0x3a1e0c });
+    rt.x = -pw * 0.34;
+    const nm = label(b.me ? 'Sen' : b.name, 22);
+    nm.anchor.set(0, 0.5);
+    nm.x = -pw * 0.28;
+    const sc = label(String(b.score), 24, { fill: 0xffe066 });
+    sc.x = pw * 0.32;
+    row.addChild(bg, rk, rt, nm, sc);
+    panel.addChild(row);
+  });
+  const myRank = meIdx + 1;
+  const rw = cupReward(myRank);
+  const info = label(rw ? `Şu an ${myRank}. sıradasın · Ödül: ${rewardText(rw)}` : `Şu an ${myRank}. sıradasın · İlk 10'a gir!`, 19, INK);
+  info.y = ph * 0.3;
+  panel.addChild(info);
 }

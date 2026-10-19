@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "python3 tools/optional_manifest.py && tsc --noEmit && vite build",
     "preview": "vite preview"
   },
   "dependencies": {

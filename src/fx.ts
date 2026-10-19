@@ -1,4 +1,20 @@
 import { Container, Sprite, Texture } from 'pixi.js';
+let confTex: Texture | null = null;
+function confettiTex(): Texture {
+  if (!confTex) {
+    const c = document.createElement('canvas');
+    c.width = 14;
+    c.height = 8;
+    const g = c.getContext('2d')!;
+    g.fillStyle = '#fff';
+    g.fillRect(0, 0, 14, 8);
+    g.fillStyle = 'rgba(0,0,0,0.18)';
+    g.fillRect(0, 5, 14, 3);
+    confTex = Texture.from(c);
+  }
+  return confTex;
+}
+const CONFETTI = [0xff4a4a, 0xffd23a, 0x4ee04a, 0x3fa0ff, 0xc06aff, 0xffffff, 0xff9a3a];
 import { tex, COLOR_TINT, COLOR_TEX } from './assets';
 
 interface P {
@@ -186,6 +202,28 @@ export class FX {
 
   flash(x: number, y: number, size: number, tint = 0xffffff, life = 0.25): void {
     this.emit(tex('p_glow'), x, y, { s0: size / 128, s1: (size / 128) * 1.5, a0: 1, a1: 0, life, tint, add: true });
+  }
+
+  /** Paper confetti shower (falls from y, spread across width w). */
+  confetti(x: number, y: number, w: number, n = 80): void {
+    for (let i = 0; i < n; i++) {
+      const sx = x + rnd(-w / 2, w / 2);
+      this.emit(confettiTex(), sx, y + rnd(-60, 20), {
+        vx: rnd(-120, 120), vy: rnd(-420, -80), g: 520, drag: 1.4, life: rnd(1.6, 2.6), spin: rnd(-10, 10), rot: rnd(0, 6),
+        s0: rnd(0.7, 1.1), s1: rnd(0.6, 1), a0: 1, a1: 0.9, tint: CONFETTI[i % CONFETTI.length],
+      });
+    }
+  }
+
+  /** Burst of confetti from a point (e.g. a popping chest). */
+  confettiBurst(x: number, y: number, n = 50): void {
+    for (let i = 0; i < n; i++) {
+      const a = rnd(-Math.PI * 0.95, -Math.PI * 0.05), sp = rnd(300, 800);
+      this.emit(confettiTex(), x, y, {
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, g: 700, drag: 1.8, life: rnd(1.2, 2), spin: rnd(-12, 12), rot: rnd(0, 6),
+        s0: rnd(0.6, 1), s1: 0.7, a0: 1, a1: 0.8, tint: CONFETTI[i % CONFETTI.length],
+      });
+    }
   }
 
   clear(): void {

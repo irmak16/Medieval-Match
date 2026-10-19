@@ -6,8 +6,14 @@ import { tween, Ease } from '../tween';
 import { getSave, save, DEV } from '../storage';
 import { updateMusic } from '../audio';
 import type { App } from '../main';
-import { dailyAvailable, questsClaimable, roadClaimable, streakBonus } from '../liveops';
-import { dailyPanel, questsPanel, roadPanel } from './panels';
+import { dailyAvailable, questsClaimable, roadClaimable, streakBonus, lives, nextLifeIn, MAX_LIVES, refillLives, REFILL_COST, cup } from '../liveops';
+import { dailyPanel, questsPanel, roadPanel, cupPanel, popup } from './panels';
+import { rescueAvailable } from './rescue';
+import { Pip, hasPip } from '../mascot';
+import { hasTex } from '../assets';
+import { exportCode, importCode } from '../storage';
+import { sfx } from '../audio';
+import type { Text } from 'pixi.js';
 import { nextTaskCost } from './castle';
 
 let dailyShownThisSession = false;
@@ -18,6 +24,11 @@ export class MenuScene extends Container {
   private playBtn: Button;
   private falcon!: Sprite;
   private sideButtons: { badge: Container; check: () => number }[] = [];
+  private pip: Pip | null = null;
+  private heartTxt!: Text;
+  private heartTimer!: Text;
+  private coinCounter!: Counter;
+  private lastSec = -1;
 
   constructor(private app: App, public W: number, public H: number) {
     super();
@@ -25,12 +36,8 @@ export class MenuScene extends Container {
 
     // floating decorative tiles
     const deco = [
-      { t: COLOR_TEX[0], x: 0.14, y: 0.5, s: 120, r: -0.25 },
-      { t: COLOR_TEX[1], x: 0.86, y: 0.52, s: 115, r: 0.2 },
-      { t: COLOR_TEX[2], x: 0.18, y: 0.63, s: 100, r: 0.3 },
-      { t: COLOR_TEX[4], x: 0.82, y: 0.64, s: 105, r: -0.2 },
-      { t: 'pw_barrel', x: 0.16, y: 0.8, s: 95, r: 0.1 },
-      { t: 'pw_orb', x: 0.84, y: 0.8, s: 100, r: -0.05 },
+      { t: 'pw_barrel', x: 0.12, y: 0.8, s: 90, r: 0.1 },
+      { t: 'pw_orb', x: 0.88, y: 0.8, s: 95, r: -0.05 },
     ];
     for (const d of deco) {
       const sp = new Sprite(tex(d.t));
@@ -60,26 +67,57 @@ export class MenuScene extends Container {
     this.falcon.scale.set(150 / this.falcon.texture.width);
     this.falcon.position.set(W / 2, H * 0.56);
     this.addChild(this.falcon);
+    if (hasPip('wave')) {
+      this.falcon.visible = false;
+      this.pip = new Pip('wave', Math.min(300, H * 0.24));
+      this.pip.position.set(W / 2, H * 0.73);
+      this.addChild(this.pip);
+      this.pip.popIn(0.2);
+      this.pip.eventMode = 'static';
+      this.pip.on('pointertap', () => {
+        sfx.click();
+        this.pip?.setPose(Math.random() < 0.5 ? 'happy' : 'wave');
+      });
+    }
 
     // counters + settings
-    const stars = new Counter('ui_star', s.stars, 160);
-    stars.position.set(110, 60);
-    const coins = new Counter('ic_coin', s.coins, 190);
-    coins.position.set(320, 60);
+    const hearts = new Counter('ic_heart', lives(), 140);
+    hearts.position.set(92, 60);
+    this.heartTxt = hearts.txt;
+    this.heartTimer = label('', 18, { fill: 0xffd0c0 });
+    this.heartTimer.position.set(110, 98);
+    hearts.eventMode = 'static';
+    hearts.cursor = 'pointer';
+    hearts.on('pointertap', () => this.livesPanel());
+    this.coinCounter = new Counter('ic_coin', s.coins, 170);
+    this.coinCounter.position.set(275, 60);
+    const stars = new Counter('ui_star', s.stars, 140);
+    stars.position.set(448, 60);
     const gear = iconButton('ic_gear', 84, () => this.openSettings());
-    gear.position.set(W - 64, 60);
-    this.addChild(stars, coins, gear);
+    gear.position.set(W - 60, 60);
+    this.addChild(hearts, this.heartTimer, this.coinCounter, stars, gear);
 
     // side buttons (right: events, left: castle + levels)
     const refresh = () => this.refreshBadges();
-    this.side(W - 86, 180, 'ic_heart', 'Günlük', () => dailyPanel(this, W, H, refresh), () => (dailyAvailable() ? 1 : 0));
-    this.side(W - 86, 310, 'ui_star', 'Görevler', () => questsPanel(this, W, H, refresh), () => questsClaimable());
-    this.side(W - 86, 440, 'ic_coin', 'Hazine Yolu', () => roadPanel(this, W, H, refresh), () => roadClaimable());
-    this.side(86, 180, 'tile_yellow', 'Kale', () => this.app.showCastle(), () => {
+    const sy = (i: number) => 185 + i * 128;
+    this.side(W - 70, sy(0), 'ic_heart', 'Günlük', () => dailyPanel(this, W, H, refresh), () => (dailyAvailable() ? 1 : 0));
+    this.side(W - 70, sy(1), 'ui_star', 'Görevler', () => questsPanel(this, W, H, refresh), () => questsClaimable());
+    this.side(W - 70, sy(2), 'ic_coin', 'Hazine Yolu', () => roadPanel(this, W, H, refresh), () => roadClaimable());
+    this.side(W - 70, sy(3), hasTex('trophy') ? 'trophy' : 'tile_yellow', 'Kupa', () => cupPanel(this, W, H, refresh), () => (cup().pending ? 1 : 0));
+    this.side(70, sy(0), 'tile_yellow', 'Kale', () => this.app.showCastle(), () => {
       const c = nextTaskCost();
       return c !== null && getSave().stars >= c ? 1 : 0;
     });
-    this.side(86, 310, 'ic_lock', 'Seviyeler', () => this.app.showLevels(), () => 0);
+    this.side(70, sy(1), hasTex('card_pack') ? 'card_pack' : 'tile_purple', 'Albüm', () => this.app.showAlbum(), () => getSave().album.packs);
+    this.side(70, sy(2), 'pw_falcon', "Pip'i Kurtar", () => {
+      if (rescueAvailable()) this.app.showRescue();
+      else {
+        sfx.invalid();
+        const left = getSave().rescue.nextAt - (getSave().level - 1);
+        this.toast(`${left} seviye daha geç, Pip yine tehlikede olacak!`);
+      }
+    }, () => (rescueAvailable() ? 1 : 0));
+    this.side(70, sy(3), 'ic_lock', 'Seviyeler', () => this.app.showLevels(), () => 0);
     this.refreshBadges();
 
     // win streak indicator
@@ -104,7 +142,7 @@ export class MenuScene extends Container {
 
     // play
     const diff = getLevel(s.level).diff ?? 'normal';
-    this.playBtn = new Button(diff === 'normal' ? 'green' : 'red', 440, `Seviye ${s.level}`, () => this.app.startLevel(getSave().level), 58);
+    this.playBtn = new Button(diff === 'normal' ? 'green' : 'red', 440, `Seviye ${s.level}`, () => this.play(), 58);
     this.playBtn.position.set(W / 2, H * 0.89);
     this.addChild(this.playBtn);
     if (diff !== 'normal') {
@@ -122,6 +160,54 @@ export class MenuScene extends Container {
       dailyShownThisSession = true;
       dailyPanel(this, W, H, () => this.refreshBadges());
     }
+  }
+
+  private play() {
+    if (lives() <= 0 && !DEV.on) {
+      this.livesPanel();
+      return;
+    }
+    this.app.startLevel(getSave().level);
+  }
+
+  private toast(text: string) {
+    const t = label(text, 26, { fill: 0xffe0b0 });
+    t.position.set(this.W / 2, this.H * 0.47);
+    if (t.width > this.W - 40) t.scale.set((this.W - 40) / t.width);
+    this.addChild(t);
+    tween(t, { alpha: 0, y: t.y - 50 }, 0.8, Ease.inQuad, 1.4).then(() => t.destroy());
+  }
+
+  private livesPanel() {
+    const { panel, ph, close } = popup(this, this.W, this.H, 'Canlar');
+    const n = lives();
+    for (let i = 0; i < MAX_LIVES; i++) {
+      const h = new Sprite(tex('ic_heart'));
+      h.anchor.set(0.5);
+      h.scale.set(0.55);
+      h.position.set((i - 2) * 90, -ph * 0.2);
+      if (i >= n) h.tint = 0x444444;
+      panel.addChild(h);
+    }
+    const ink = { fill: 0x5a2e0e, stroke: 0xfff2d0, strokeW: 4, shadow: false } as const;
+    const t = label(n >= MAX_LIVES ? 'Canların dolu!' : `Sonraki can: ${nextLifeIn()}\nHer 20 dakikada 1 can dolar.`, 28, ink);
+    t.y = -ph * 0.04;
+    panel.addChild(t);
+    if (n < MAX_LIVES) {
+      const b = new Button('green', 330, `Doldur (${REFILL_COST} altın)`, () => {
+        if (refillLives()) {
+          sfx.coin();
+          close();
+          this.app.showMenu();
+        } else sfx.invalid();
+      }, 28);
+      b.y = ph * 0.18;
+      if (getSave().coins < REFILL_COST) b.alpha = 0.55;
+      panel.addChild(b);
+    }
+    const c = new Button('red', 240, 'Kapat', close, 34);
+    c.y = ph * 0.33;
+    panel.addChild(c);
   }
 
   private side(x: number, y: number, icon: string, text: string, onTap: () => void, check: () => number) {
@@ -143,9 +229,17 @@ export class MenuScene extends Container {
 
   update(dt: number) {
     this.t += dt;
+    this.pip?.update(dt);
+    const sec = Math.floor(this.t);
+    if (sec !== this.lastSec) {
+      this.lastSec = sec;
+      const n = lives();
+      this.heartTxt.text = String(n);
+      this.heartTimer.text = n >= MAX_LIVES ? 'Dolu' : nextLifeIn();
+    }
     // falcon glides around in a lazy figure-eight
     const f = this.falcon;
-    if (f && !f.destroyed) {
+    if (f && !f.destroyed && f.visible) {
       const k = this.t * 0.45;
       const nx = this.W / 2 + Math.sin(k) * this.W * 0.3;
       const ny = this.H * 0.56 + Math.sin(k * 2) * 40;
@@ -184,11 +278,31 @@ export class MenuScene extends Container {
       return b;
     };
     panel.addChild(
-      mk(-ph * 0.2, () => `Ses: ${s.sound ? 'Açık' : 'Kapalı'}`, () => { s.sound = !s.sound; save(); }),
-      mk(-ph * 0.02, () => `Müzik: ${s.music ? 'Açık' : 'Kapalı'}`, () => { s.music = !s.music; save(); updateMusic(); }),
+      mk(-ph * 0.24, () => `Ses: ${s.sound ? 'Açık' : 'Kapalı'}`, () => { s.sound = !s.sound; save(); }),
+      mk(-ph * 0.11, () => `Müzik: ${s.music ? 'Açık' : 'Kapalı'}`, () => { s.music = !s.music; save(); updateMusic(); }),
     );
+    const exp = new Button('green', 280, 'Kayıt Kodu Al', () => {
+      const code = exportCode();
+      try {
+        navigator.clipboard?.writeText(code);
+      } catch {
+        /* ignore */
+      }
+      window.prompt('İlerleme kodun (kopyalandı). Diğer cihazda "Kodu Yükle" ile kullan:', code);
+    }, 28);
+    exp.y = ph * 0.02;
+    const imp = new Button('green', 280, 'Kodu Yükle', () => {
+      const code = window.prompt('Kayıt kodunu yapıştır:');
+      if (!code) return;
+      if (importCode(code)) {
+        root.destroy({ children: true });
+        this.app.showMenu();
+      } else window.alert('Kod geçersiz.');
+    }, 28);
+    imp.y = ph * 0.15;
+    panel.addChild(exp, imp);
     const close = new Button('red', 260, 'Kapat', () => root.destroy({ children: true }), 34);
-    close.y = ph * 0.25;
+    close.y = ph * 0.31;
     panel.addChild(close);
     panel.position.set(this.W / 2, this.H / 2);
     root.addChild(panel);

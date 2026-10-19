@@ -19,26 +19,33 @@ export async function loadAssets(onProgress?: (p: number) => void): Promise<void
   await Assets.loadBundle('main', onProgress);
 }
 
-/** Optional art (booster icons, treasure chest, castle pieces). Missing files are simply skipped. */
-export const OPTIONAL = [
+/** Optional art (added over time). Missing files are simply skipped and the game uses fallbacks. */
+const CARD_IDS = ['a', 'b', 'c'].flatMap((s) => Array.from({ length: 9 }, (_, i) => `card_${s}${i + 1}`));
+export const OPTIONAL: string[] = [
   'bt_hammer', 'bt_row', 'bt_col', 'bt_shuffle', 'it_chest', 'ob_vines_grow',
-  'castle_1', 'castle_2', 'castle_3', 'castle_4', 'castle_5', 'castle_6',
+  ...[1, 2, 3, 4, 5, 6].flatMap((i) => [`castle_${i}`, `castle_${i}_ruin`]),
+  'pip_wave', 'pip_happy', 'pip_sad', 'pip_scared', 'pip_build',
+  'card_pack', 'trophy', 'dungeon',
+  ...CARD_IDS,
 ];
 const loadedOptional = new Set<string>();
 
+/** Optional assets are listed in assets/optional.json at build time (no 404 probing). */
 export async function loadOptional(): Promise<void> {
+  let list: Record<string, string> = {};
+  try {
+    const res = await fetch('assets/optional.json', { cache: 'no-cache' });
+    if (res.ok) list = await res.json();
+  } catch {
+    /* none */
+  }
   await Promise.all(
-    OPTIONAL.map(async (n) => {
+    OPTIONAL.filter((n) => list[n]).map(async (n) => {
       try {
-        for (const ext of n.startsWith('castle_') ? ['jpg', 'png'] : ['png']) {
-          const res = await fetch(`assets/${n}.${ext}`, { method: 'HEAD' });
-          if (!res.ok || !(res.headers.get('content-type') || '').includes('image')) continue;
-          await Assets.load({ alias: n, src: `assets/${n}.${ext}` });
-          loadedOptional.add(n);
-          return;
-        }
+        await Assets.load({ alias: n, src: `assets/${list[n]}` });
+        loadedOptional.add(n);
       } catch {
-        /* not available yet */
+        /* broken file */
       }
     }),
   );
