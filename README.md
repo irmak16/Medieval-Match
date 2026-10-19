@@ -10,7 +10,8 @@ Ortaçağ temalı, Royal Match tarzı bir match-3 oyunu. TypeScript + PixiJS ile
 - **5'li sıra → Kristal küre**: bir rengin tamamını siler.
 - Güçlendiricileri birbiriyle değiştirerek kombo yap (ör. küre + küre tüm tahtayı temizler).
 - Engeller: tahta sandık, taş blok (1–3 can), sarmaşık ve zincir.
-- 40 elle tasarlanmış seviye + 100 hazır üretilmiş seviye (toplam 140), sonrasında sonsuz otomatik seviye.
+- 60 elle tasarlanmış seviye + 100 hazır üretilmiş seviye (toplam 160), sonrasında sonsuz otomatik seviye.
+- Buz zemini (1–2 vuruş), seviye haritası, kale, kart albümü, Kraliyet Kupası, Pip'i Kurtar mini oyunu, 5 can sistemi.
 - Yeni mekanikler: **Kraliyet Hazinesi** (en alta indir), **Büyülü Geçit** (portal), **Büyüyen Sarmaşık**.
 - Oyun içi güçlendiriciler (hamle harcamaz): Çekiç, Okçu, Mancınık, Soytarı.
 - Kale restorasyonu: yıldızlarla 6 bölgeyi onar, her bölge ödül verir.
@@ -38,6 +39,8 @@ Hamle sayıları tahminle değil, oyunun kurallarını taklit eden bir simülat�
 ```bash
 python3 tools/sim.py 12          # her seviyeyi 12 kez oynatır, kazanma oranlarını gösterir
 python3 tools/tune_moves.py 24   # src/levels.ts içindeki hamle sayılarını yeniden ayarlar
+python3 tools/variety.py         # seviyelerin mekanik / boyut / hedef çeşitliliği
+python3 tools/level_report.py    # seviye doğrulaması (GitHub Actions'ta da çalışır)
 ```
 Hedefler: normal seviye ≈ %90, Zor ≈ %50, Çok Zor ≈ %30 bot kazanma oranı.
 

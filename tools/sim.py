@@ -32,6 +32,7 @@ class Board:
         self.ok = [[ch != 'x' for ch in row] for row in lv['grid']]
         self.blk = [[None] * self.W for _ in range(self.H)]   # (type, hp)
         self.chain = [[False] * self.W for _ in range(self.H)]
+        self.ice = [[0] * self.W for _ in range(self.H)]
         self.tile = [[None] * self.W for _ in range(self.H)]  # ('c', color) or (kind, -1)
         for r, row in enumerate(lv['grid']):
             for c, ch in enumerate(row):
@@ -42,13 +43,15 @@ class Board:
                 elif ch == 'T': self.tile[r][c] = ('gold', -1)
                 elif ch in 'HVBFO':
                     self.tile[r][c] = ({'H': 'ah', 'V': 'av', 'B': 'barrel', 'F': 'falcon', 'O': 'orb'}[ch], -1)
+                elif ch in 'iI':
+                    self.tile[r][c] = ('c', self.safe_color(r, c)); self.ice[r][c] = 1 if ch == 'i' else 2
                 elif ch in '.c':
                     self.tile[r][c] = ('c', self.safe_color(r, c))
                     if ch == 'c': self.chain[r][c] = True
         self.goals = {}
         for t, n in lv['goals']:
             if n is None:
-                chars = {'crate': '123', 'stone': '456', 'vines': 'vg', 'chain': 'c', 'gold': 'T'}[t]
+                chars = {'crate': '123', 'stone': '456', 'vines': 'vg', 'chain': 'c', 'gold': 'T', 'ice': 'iI'}[t]
                 n = sum(ch in chars for row in lv['grid'] for ch in row) + (lv.get('items', 0) if t == 'gold' else 0)
             self.goals[t] = n
         self.items_left = lv.get('items', 0)
@@ -89,6 +92,11 @@ class Board:
             if b[0] == 'vines': self.vines_broken = True
             self.collect(b[0])
 
+    def crack(self, r, c):
+        if self.ice[r][c] > 0:
+            self.ice[r][c] -= 1
+            if self.ice[r][c] == 0: self.collect('ice')
+
     def hit(self, r, c, queue):
         if not (0 <= r < self.H and 0 <= c < self.W) or not self.ok[r][c]:
             return
@@ -97,16 +105,20 @@ class Board:
         if self.chain[r][c]:
             self.chain[r][c] = False; self.collect('chain'); return
         t = self.tile[r][c]
-        if not t or t[0] == 'gold': return
+        if not t:
+            self.crack(r, c); return
+        if t[0] == 'gold': return
         if t[0] != 'c':
             queue.append((r, c)); return
         self.tile[r][c] = None
+        self.crack(r, c)
         self.collect(COLORS[t[1]])
 
     def activate(self, r, c, queue, color=None):
         t = self.tile[r][c]
         if not t or t[0] in ('c', 'gold'): return
         self.tile[r][c] = None
+        self.crack(r, c)
         k = t[0]
         if k == 'ah': self.arrow(r, c, 'h', queue)
         elif k == 'av': self.arrow(r, c, 'v', queue)
@@ -280,7 +292,7 @@ class Board:
                     self.chain[r][c] = False; self.collect('chain'); continue
                 t = self.tile[r][c]
                 if t and t[0] == 'c':
-                    self.collect(COLORS[t[1]]); self.tile[r][c] = None
+                    self.collect(COLORS[t[1]]); self.tile[r][c] = None; self.crack(r, c)
             if power and not self.tile[anchor[0]][anchor[1]] and not self.chain[anchor[0]][anchor[1]]:
                 self.tile[anchor[0]][anchor[1]] = (power, -1)
         self.run_queue(queue)

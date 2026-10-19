@@ -119,8 +119,25 @@ export class Counter extends Container {
     this.txt = label(String(value), 30);
     this.txt.x = 18;
     this.addChild(this.txt);
+    this.target = this.shown = value;
   }
+  private shown = 0;
+  private target = 0;
   set value(v: number) {
+    this.target = v;
+    this.shown = v;
     this.txt.text = String(v);
+  }
+  /** Roll the number up/down to v with a little pop. */
+  rollTo(v: number, dur = 0.8) {
+    const from = this.target;
+    this.target = v;
+    const h = { k: 0 };
+    tween(h, { k: 1 }, dur, Ease.outCubic, 0, () => {
+      this.shown = Math.round(from + (v - from) * h.k);
+      this.txt.text = String(this.shown);
+    });
+    this.txt.scale.set(1.25);
+    tween(this.txt.scale, { x: 1, y: 1 }, 0.35, Ease.outBack);
   }
 }

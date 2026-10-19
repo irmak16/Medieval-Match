@@ -5,7 +5,8 @@ import { addPacks } from '../album';
 import { Pip, hasPip } from '../mascot';
 import { FX } from '../fx';
 import { getLevel, GoalType, LevelDef } from '../levels';
-import { tex, hasTex, texOr } from '../assets';
+import { tex, hasTex, texOr, iceTex } from '../assets';
+const gtex = (n: string) => (n === '__ice' ? iceTex(2) : tex(n));
 import { label, woodPanel, Button, iconButton, overlay } from '../ui';
 import { tween, Ease, wait, clearTimers, after, killTweens } from '../tween';
 import { sfx, updateMusic, setMusicIntensity } from '../audio';
@@ -14,7 +15,7 @@ import type { App } from '../main';
 
 const GOAL_TEX: Record<GoalType, string> = {
   red: 'tile_red', blue: 'tile_blue', green: 'tile_green', yellow: 'tile_yellow', purple: 'tile_purple',
-  crate: 'ob_crate1', stone: 'ob_stone1', chain: 'ob_chain', vines: 'ob_vines', gold: 'ic_coin',
+  crate: 'ob_crate1', stone: 'ob_stone1', chain: 'ob_chain', vines: 'ob_vines', gold: 'ic_coin', ice: '__ice',
 };
 
 const BOOSTERS: { k: BoosterKind; tex: string; fallback: string; rot: number; name: string; price: number; hint: string }[] = [
@@ -90,7 +91,7 @@ export class GameScene extends Container {
       node.position.set(12 + 20 + (goalArea - 20 - n * gw) / 2 + gw * (i + 0.5), hudY + hudH / 2 + 4);
       const onlyGrow = gd.type === 'vines' && this.def.grid.some((r) => r.includes('g')) && !this.def.grid.some((r) => r.includes('v'));
       const icon = new Sprite(
-        gd.type === 'gold' ? texOr('it_chest', 'ic_coin') : onlyGrow ? texOr('ob_vines_grow', 'ob_vines') : tex(GOAL_TEX[gd.type]),
+        gd.type === 'gold' ? texOr('it_chest', 'ic_coin') : onlyGrow ? texOr('ob_vines_grow', 'ob_vines') : gtex(GOAL_TEX[gd.type]),
       );
       icon.anchor.set(0.5);
       icon.scale.set(Math.min(74, gw - 10) / icon.texture.width);
@@ -208,6 +209,11 @@ export class GameScene extends Container {
 
   private countInGrid(type: GoalType): number {
     const chars = type === 'crate' ? '123' : type === 'stone' ? '456' : type === 'vines' ? 'vg' : type === 'chain' ? 'c' : type === 'gold' ? 'T' : '';
+    if (type === 'ice') {
+      let k = 0;
+      for (const row of this.def.grid) for (const ch of row) k += ch === 'i' || ch === 'I' ? 1 : 0;
+      return k;
+    }
     let n = type === 'gold' ? this.def.items ?? 0 : 0;
     for (const row of this.def.grid) for (const ch of row) if (chars.includes(ch)) n++;
     return n;
@@ -380,6 +386,7 @@ export class GameScene extends Container {
       13: { key: 'tip_purple', title: 'Yeni Renk!', icons: ['tile_purple'], text: 'Büyü kitabı tahtaya katıldı.\nArtık 5 renk var, eşleşmeler zorlaşıyor!' },
       31: { key: 'tip_gold', title: 'Yeni: Kraliyet Hazinesi', icons: [hasTex('it_chest') ? 'it_chest' : 'ic_coin'], text: 'Hazineyi eşleşmelerle aşağı indir.\nTahtanın en altına ulaşınca toplanır!' },
       32: { key: 'tip_portal', title: 'Yeni: Büyülü Geçit', icons: ['p_ring'], text: 'Bir geçidin altına düşen taşlar\ndiğer geçitten çıkar.' },
+      41: { key: 'tip_ice', title: 'Yeni: Buz', icons: ['__ice'], text: 'Buzun üstündeki taşı patlat,\nbuz kırılsın. Kalın buz iki vuruş ister.' },
       33: { key: 'tip_grow', title: 'Yeni: Büyüyen Sarmaşık', icons: ['ob_vines'], text: 'Bir hamlede hiç sarmaşık kırmazsan\nsarmaşık yanındaki taşa yayılır!' },
     };
     const tip = tips[this.levelNo];
@@ -387,7 +394,7 @@ export class GameScene extends Container {
     return new Promise((resolve) => {
       const { root, panel, ph } = this.popup(tip.title);
       tip.icons.forEach((n, i) => {
-        const ic = new Sprite(tex(n));
+        const ic = new Sprite(gtex(n));
         ic.anchor.set(0.5);
         ic.scale.set(110 / ic.texture.width);
         ic.position.set((i - (tip.icons.length - 1) / 2) * 120, -ph * 0.17);
@@ -561,7 +568,7 @@ export class GameScene extends Container {
     g.left--;
     const from = this.toLocal(new Point(gx, gy));
     const to = this.toLocal(g.icon.getGlobalPosition());
-    const s = new Sprite(tex(texName));
+    const s = new Sprite(gtex(texName));
     s.anchor.set(0.5);
     const base = this.board.S / s.texture.width;
     s.scale.set(base * 0.9);
@@ -744,9 +751,18 @@ export class GameScene extends Container {
     coin.anchor.set(0.5);
     coin.scale.set(0.62);
     coin.position.set(-50, ph * 0.17);
-    const ct = label(`+${reward}`, 44, { fill: 0xffe066 });
+    const ct = label('+0', 44, { fill: 0xffe066 });
     ct.position.set(30, ph * 0.17);
     panel.addChild(coin, ct);
+    const roll = { v: 0 };
+    tween(roll, { v: reward }, 0.9, Ease.outCubic, 0.5, () => {
+      ct.text = `+${Math.round(roll.v)}`;
+    });
+    after(0.5, () => {
+      const g = coin.getGlobalPosition();
+      const l = this.toLocal(g);
+      this.uiFx.sparkleBurst(l.x, l.y, 18, 0xffe070, 5);
+    }, 'ui');
     if (gotPack) {
       const pk = label('+1 kart paketi!', 26, { fill: 0x2f7a1a, stroke: 0xfff2d0, strokeW: 4, shadow: false });
       pk.y = ph * 0.245;

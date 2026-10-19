@@ -27,6 +27,9 @@ interface P {
   fadeIn: number;
 }
 
+/** Fewer particles on low-end devices. */
+export const LOW_END = typeof navigator !== 'undefined' && ((navigator.hardwareConcurrency || 8) <= 4 || ((navigator as any).deviceMemory || 8) <= 3);
+const MAX_PARTICLES = LOW_END ? 420 : 900;
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 
 export class FX {
@@ -54,7 +57,7 @@ export class FX {
     texture: Texture, x: number, y: number,
     o: { vx?: number; vy?: number; g?: number; drag?: number; life?: number; spin?: number; rot?: number; s0?: number; s1?: number; a0?: number; a1?: number; tint?: number; add?: boolean; fadeIn?: number },
   ): void {
-    if (this.ps.length > 900) return;
+    if (this.ps.length > MAX_PARTICLES) return;
     const s = this.spawn(texture, x, y, !!o.add);
     if (o.tint !== undefined) s.tint = o.tint;
     s.rotation = o.rot ?? 0;
@@ -224,6 +227,18 @@ export class FX {
         s0: rnd(0.6, 1), s1: 0.7, a0: 1, a1: 0.8, tint: CONFETTI[i % CONFETTI.length],
       });
     }
+  }
+
+  iceShards(x: number, y: number): void {
+    const u = this.unit;
+    for (let i = 0; i < 7; i++) {
+      const a = rnd(-Math.PI, 0), sp = rnd(2, 5) * u;
+      this.emit(tex('p_sparkle'), x + rnd(-0.3, 0.3) * u, y + rnd(-0.3, 0.3) * u, {
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, g: 18 * u, life: rnd(0.4, 0.7), rot: rnd(0, 3), spin: rnd(-8, 8),
+        s0: (u / 128) * rnd(0.3, 0.5), s1: 0.05, a0: 1, a1: 0.6, tint: i % 2 ? 0xbfeaff : 0xffffff, add: true,
+      });
+    }
+    this.emit(tex('p_ring'), x, y, { s0: u / 128 * 0.4, s1: u / 128 * 1.4, a0: 0.9, a1: 0, life: 0.3, tint: 0xbfeaff, add: true });
   }
 
   clear(): void {

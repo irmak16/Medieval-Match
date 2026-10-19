@@ -147,6 +147,11 @@ export const sfx = {
     if (!throttle('vines', 50)) return;
     noise(0.2, 'bandpass', 3500, 1500, 0.25, 0, 0.8);
   },
+  ice() {
+    if (!throttle('ice', 45)) return;
+    tone(2600 + Math.random() * 600, 0.12, 'triangle', 0.08, 0, 1800, true);
+    noise(0.12, 'highpass', 4000, 7000, 0.18);
+  },
   arrow() {
     noise(0.4, 'bandpass', 4000, 600, 0.3, 0, 2.5, true);
     tone(1200, 0.25, 'sawtooth', 0.04, 0, 300);

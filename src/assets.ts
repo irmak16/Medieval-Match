@@ -67,3 +67,55 @@ export function tex(name: string): Texture {
 export const COLOR_TEX = ['tile_red', 'tile_blue', 'tile_green', 'tile_yellow', 'tile_purple'];
 // particle tint per tile color
 export const COLOR_TINT = [0xff4a3a, 0x3fa0ff, 0x4ee04a, 0xffd23a, 0xc06aff];
+
+// procedurally drawn ice floor (hp 2 = thick, hp 1 = cracked)
+const iceCache: Record<number, Texture> = {};
+export function iceTex(hp: number): Texture {
+  if (iceCache[hp]) return iceCache[hp];
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d')!;
+  const r = 20;
+  const path = () => {
+    g.beginPath();
+    g.moveTo(6 + r, 6);
+    g.arcTo(122, 6, 122, 122, r);
+    g.arcTo(122, 122, 6, 122, r);
+    g.arcTo(6, 122, 6, 6, r);
+    g.arcTo(6, 6, 122, 6, r);
+    g.closePath();
+  };
+  const grad = g.createLinearGradient(0, 0, 128, 128);
+  grad.addColorStop(0, hp >= 2 ? 'rgba(170,225,255,0.95)' : 'rgba(190,235,255,0.75)');
+  grad.addColorStop(1, hp >= 2 ? 'rgba(70,150,230,0.95)' : 'rgba(110,185,240,0.7)');
+  path();
+  g.fillStyle = grad;
+  g.fill();
+  g.lineWidth = 5;
+  g.strokeStyle = 'rgba(255,255,255,0.9)';
+  g.stroke();
+  // shine
+  g.fillStyle = 'rgba(255,255,255,0.55)';
+  g.beginPath();
+  g.moveTo(18, 30);
+  g.lineTo(46, 14);
+  g.lineTo(56, 14);
+  g.lineTo(18, 42);
+  g.closePath();
+  g.fill();
+  if (hp >= 2) {
+    g.strokeStyle = 'rgba(255,255,255,0.6)';
+    g.lineWidth = 4;
+    g.strokeRect(20, 20, 88, 88);
+  } else {
+    g.strokeStyle = 'rgba(255,255,255,0.85)';
+    g.lineWidth = 3;
+    g.beginPath();
+    g.moveTo(64, 64); g.lineTo(30, 40); g.moveTo(64, 64); g.lineTo(100, 50);
+    g.moveTo(64, 64); g.lineTo(80, 108); g.moveTo(64, 64); g.lineTo(28, 96);
+    g.moveTo(46, 52); g.lineTo(40, 70);
+    g.stroke();
+  }
+  iceCache[hp] = Texture.from(c);
+  return iceCache[hp];
+}

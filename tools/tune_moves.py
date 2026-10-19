@@ -21,7 +21,7 @@ for n, lv in enumerate(levels, 1):
     pct = lambda p: res[min(len(res) - 1, int(p * len(res)))]
     if lv['diff'] == 'superhard': m = pct(0.30) + 1
     elif lv['diff'] == 'hard': m = pct(0.50) + 1
-    else: m = max(15, pct(0.85) + 3)
+    else: m = max(12, pct(0.85) + 3)
     new_moves.append(m)
     win = sum(r <= m for r in res) / RUNS
     print(f"{n:>3} {lv['diff']:10} median={pct(0.5):>3}  moves {lv['moves']:>3} -> {m:>3}  bot win {win:.0%}", flush=True)

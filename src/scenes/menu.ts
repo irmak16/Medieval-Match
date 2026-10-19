@@ -117,7 +117,7 @@ export class MenuScene extends Container {
         this.toast(`${left} seviye daha geç, Pip yine tehlikede olacak!`);
       }
     }, () => (rescueAvailable() ? 1 : 0));
-    this.side(70, sy(3), 'ic_lock', 'Seviyeler', () => this.app.showLevels(), () => 0);
+    this.side(70, sy(3), 'ic_lock', 'Harita', () => this.app.showLevels(), () => 0);
     this.refreshBadges();
 
     // win streak indicator

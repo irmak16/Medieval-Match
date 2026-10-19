@@ -1,8 +1,10 @@
 import '@fontsource/titan-one/latin-400.css';
 import '@fontsource/titan-one/latin-ext-400.css';
 import '@fontsource/baloo-2/latin-ext-800.css';
-import { Application, Container, Sprite } from 'pixi.js';
+import { Application, Container, Graphics, Sprite } from 'pixi.js';
+import { tween, Ease } from './tween';
 import { loadAssets, loadOptional, tex } from './assets';
+import { LOW_END } from './fx';
 import { updateTweens } from './tween';
 import { loadSave } from './storage';
 import { unlockAudio, loadRecordedAudio } from './audio';
@@ -22,13 +24,16 @@ export class App {
   root = new Container();
   scene: MenuScene | GameScene | LevelsScene | CastleScene | AlbumScene | RescueScene | null = null;
   sceneH = 1280;
+  curtain!: Graphics;
+  private switching = false;
 
   async start() {
     await this.pixi.init({
       resizeTo: window,
       background: '#2b1a10',
       antialias: true,
-      resolution: Math.min(window.devicePixelRatio || 1, 2),
+      resolution: Math.min(window.devicePixelRatio || 1, LOW_END ? 1.5 : 2),
+      powerPreference: 'high-performance',
       autoDensity: true,
     });
     document.getElementById('app')!.appendChild(this.pixi.canvas);
@@ -42,17 +47,24 @@ export class App {
     } catch {
       /* fall back to system font */
     }
-    const loader = document.getElementById('loader');
+    const fill = document.getElementById('loadfill');
+    const tips = ['Şövalyeler hazırlanıyor…', 'Kale kapıları açılıyor…', 'Hazine sayılıyor…', 'Pip miğferini takıyor…'];
+    const txt = document.getElementById('loadtxt');
+    if (txt) txt.textContent = tips[Math.floor(Math.random() * tips.length)];
     await loadAssets((p) => {
-      if (loader) loader.textContent = `Yükleniyor… %${Math.round(p * 100)}`;
+      if (fill) fill.style.width = `${Math.round(p * 85)}%`;
     });
     await loadOptional();
+    if (fill) fill.style.width = '100%';
     loadRecordedAudio();
-    document.getElementById('loader')?.remove();
+    const loader = document.getElementById('loader');
+    loader?.classList.add('hide');
+    setTimeout(() => loader?.remove(), 500);
 
     this.bg = new Sprite(tex('bg_game'));
     this.bg.anchor.set(0.5);
-    this.pixi.stage.addChild(this.bg, this.root);
+    this.curtain = new Graphics();
+    this.pixi.stage.addChild(this.bg, this.root, this.curtain);
     this.pixi.stage.eventMode = 'passive';
     window.addEventListener('pointerdown', () => unlockAudio());
 
@@ -91,20 +103,36 @@ export class App {
     this.bg.position.set(sw / 2, sh / 2);
   }
 
-  private setScene(make: (h: number) => MenuScene | GameScene | LevelsScene | CastleScene | AlbumScene | RescueScene) {
+  /** Iris-style curtain: closes over the old scene, swaps, then opens on the new one. */
+  private async setScene(make: (h: number) => MenuScene | GameScene | LevelsScene | CastleScene | AlbumScene | RescueScene) {
+    if (this.switching) return;
+    this.switching = true;
+    const sw = this.pixi.screen.width, sh = this.pixi.screen.height;
+    const R = Math.hypot(sw, sh) / 2 + 10;
+    const draw = (k: number) => {
+      // k = 0 open, 1 closed
+      this.curtain.clear();
+      if (k <= 0) return;
+      const r = R * (1 - k);
+      this.curtain.rect(0, 0, sw, sh).fill({ color: 0x1a0e06 });
+      if (r > 1) this.curtain.circle(sw / 2, sh / 2, r).cut();
+    };
+    const hold = { k: 0 };
+    if (this.scene) await tween(hold, { k: 1 }, 0.28, Ease.inQuad, 0, () => draw(hold.k));
+    draw(1);
+    this.doSetScene(make);
+    await tween(hold, { k: 0 }, 0.32, Ease.outQuad, 0.05, () => draw(hold.k));
+    draw(0);
+    this.switching = false;
+  }
+
+  private doSetScene(make: (h: number) => MenuScene | GameScene | LevelsScene | CastleScene | AlbumScene | RescueScene) {
     if (this.scene) this.scene.destroyScene();
     const { h } = this.metrics();
     this.sceneH = Math.min(h, 1600);
     this.scene = make(this.sceneH);
     this.root.addChild(this.scene);
     this.layout();
-    this.scene.alpha = 0;
-    const s = this.scene;
-    const fade = () => {
-      s.alpha = Math.min(1, s.alpha + 0.12);
-      if (s.alpha < 1 && !s.destroyed) requestAnimationFrame(fade);
-    };
-    fade();
   }
 
   showMenu() {

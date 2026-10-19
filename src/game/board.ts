@@ -1,5 +1,5 @@
 import { Container, Graphics, Sprite, Rectangle, FederatedPointerEvent, Point } from 'pixi.js';
-import { tex, hasTex, COLOR_TEX, COLOR_TINT } from '../assets';
+import { tex, hasTex, COLOR_TEX, COLOR_TINT, iceTex } from '../assets';
 import { FX } from '../fx';
 import { tween, Ease, after, pendingTimers, clearTimers, killTweens } from '../tween';
 import { sfx } from '../audio';
@@ -42,7 +42,7 @@ export class Tile {
 }
 
 interface Blocker { type: BlockType; hp: number; spr: Sprite; grow?: boolean }
-interface Cell { ok: boolean; blocker: Blocker | null; chain: Sprite | null; tile: Tile | null }
+interface Cell { ok: boolean; blocker: Blocker | null; chain: Sprite | null; tile: Tile | null; ice: { hp: number; spr: Sprite } | null }
 
 interface Projectile { update(dt: number): boolean } // returns false when finished
 
@@ -78,6 +78,7 @@ export class Board extends Container {
   private tileLayer = new Container();
   private blockLayer = new Container();
   private chainLayer = new Container();
+  private iceLayer = new Container();
   private fxLayer = new Container();
   private fxAdd = new Container();
   private projLayer = new Container();
@@ -110,11 +111,11 @@ export class Board extends Container {
     // --- cells
     for (let r = 0; r < this.H; r++) {
       const row: Cell[] = [];
-      for (let c = 0; c < this.W; c++) row.push({ ok: def.grid[r][c] !== 'x', blocker: null, chain: null, tile: null });
+      for (let c = 0; c < this.W; c++) row.push({ ok: def.grid[r][c] !== 'x', blocker: null, chain: null, tile: null, ice: null });
       this.grid.push(row);
     }
 
-    this.addChild(this.bgLayer, this.tileLayer, this.blockLayer, this.chainLayer, this.fxLayer, this.fxAdd, this.projLayer);
+    this.addChild(this.bgLayer, this.iceLayer, this.tileLayer, this.blockLayer, this.chainLayer, this.fxLayer, this.fxAdd, this.projLayer);
     this.drawBackground();
 
     // tile mask: only playable cells
@@ -143,6 +144,7 @@ export class Board extends Container {
           else if (ch === 'F') kind = 'falcon';
           else if (ch === 'O') kind = 'orb';
           else if (ch === 'T') kind = 'gold';
+          if (ch === 'i' || ch === 'I') this.addIce(r, c, ch === 'I' ? 2 : 1);
           const t = this.makeTile(kind, kind === 'c' ? this.safeColor(r, c) : -1);
           this.place(t, r, c);
           t.y = r;
@@ -267,6 +269,40 @@ export class Board extends Container {
     b.spr.texture = tex(name);
     b.spr.tint = tint;
     b.spr.scale.set((this.S * 0.98) / b.spr.texture.width);
+  }
+
+  private addIce(r: number, c: number, hp: number) {
+    const spr = new Sprite(iceTex(hp));
+    spr.anchor.set(0.5);
+    spr.scale.set(this.S / 128);
+    spr.position.set((c + 0.5) * this.S, (r + 0.5) * this.S);
+    this.iceLayer.addChild(spr);
+    this.grid[r][c].ice = { hp, spr };
+  }
+
+  /** Ice under a cell cracks whenever the tile on it is cleared (or the cell is blasted). */
+  private crackIce(r: number, c: number) {
+    const cl = this.cell(r, c);
+    const ice = cl?.ice;
+    if (!cl || !ice) return;
+    ice.hp--;
+    this.changed = true;
+    sfx.ice();
+    const x = (c + 0.5) * this.S, y = (r + 0.5) * this.S;
+    this.fx.iceShards(x, y);
+    if (ice.hp > 0) {
+      ice.spr.texture = iceTex(ice.hp);
+      return;
+    }
+    cl.ice = null;
+    this.hooks.stat?.('ice');
+    if (this.hooks.wantsGoal('ice')) {
+      const g = this.toGlobal(new Point(x, y));
+      this.hooks.collect('ice', g.x, g.y, '__ice');
+    }
+    const sp = ice.spr;
+    tween(sp.scale, { x: sp.scale.x * 1.2, y: sp.scale.y * 1.2 }, 0.15);
+    tween(sp, { alpha: 0 }, 0.15).then(() => sp.destroy());
   }
 
   private addChain(r: number, c: number) {
@@ -741,7 +777,34 @@ export class Board extends Container {
     tween(t.spr, { y: 0 }, 0.2, Ease.outQuad);
   }
 
+  private shineT = 2;
+  /** Every few seconds a random idle tile gets a glossy shine sweep (keeps the board alive). */
+  private idleShine(dt: number) {
+    this.shineT -= dt;
+    if (this.shineT > 0) return;
+    this.shineT = 1.2 + Math.random() * 2.5;
+    const list = [...this.tiles].filter((t) => t.kind === 'c' && t.state === 'idle');
+    if (!list.length) return;
+    const t = list[rnd(list.length)];
+    const s = new Sprite(tex('p_streak'));
+    s.anchor.set(0.5);
+    s.blendMode = 'add';
+    s.rotation = -0.8;
+    s.alpha = 0;
+    s.scale.set((this.S * 0.7) / 128, (this.S * 0.22) / 128);
+    s.position.set(-this.S * 0.35, this.S * 0.25);
+    t.view.addChild(s);
+    tween(s, { alpha: 0.85 }, 0.12);
+    tween(s, { x: this.S * 0.3, y: -this.S * 0.3 }, 0.45, Ease.inOutQuad).then(() => {
+      tween(s, { alpha: 0 }, 0.12).then(() => s.destroy());
+    });
+    // tiny happy squash
+    const sc = t.spr.scale.x;
+    tween(t.spr.scale, { y: sc * 1.06 }, 0.12).then(() => tween(t.spr.scale, { y: sc }, 0.3, Ease.outElastic));
+  }
+
   private animateIdle(dt: number) {
+    if (this.inputEnabled) this.idleShine(dt);
     for (const t of this.tiles) {
       if (!t.isPower) continue;
       t.phase += dt;
@@ -867,6 +930,7 @@ export class Board extends Container {
   private resolveGroup(g: Group) {
     this.cascade++;
     sfx.match(this.cascade);
+    Board.buzz(this.cascade > 3 ? 14 : 8);
     const S = this.S;
     const ar = g.anchor.r, ac = g.anchor.c;
     const damaged = new Set<string>();
@@ -890,6 +954,7 @@ export class Board extends Container {
       }
       if (g.power) {
         // merge into the anchor cell
+        this.crackIce(t.r, t.c);
         cl.tile = null;
         this.tiles.delete(t);
         this.collectColor(t);
@@ -938,6 +1003,7 @@ export class Board extends Container {
   /** Remove a normal tile with a pop. */
   private clearTile(t: Tile) {
     this.changed = true;
+    this.crackIce(t.r, t.c);
     const cl = this.grid[t.r]?.[t.c];
     if (cl && cl.tile === t) cl.tile = null;
     this.tiles.delete(t);
@@ -1019,6 +1085,10 @@ export class Board extends Container {
       return;
     }
     const t = cl.tile;
+    if (!t && cl.ice) {
+      this.crackIce(r, c);
+      return;
+    }
     if (!t || t.state === 'spawn' || t.state === 'swap' || t.isItem) return;
     if (t.isPower) {
       after(0.06, () => {
@@ -1047,6 +1117,7 @@ export class Board extends Container {
     this.clearHint();
     const r = t.r, c = t.c;
     this.detach(t);
+    this.crackIce(r, c);
     const v = t.view;
     tween(v.scale, { x: 1.3, y: 1.3 }, 0.08).then(() => v.destroy({ children: true }));
     switch (t.kind) {
