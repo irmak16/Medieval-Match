@@ -680,21 +680,10 @@ export class GameScene extends Container {
     banner.destroy();
     const leftMoves = this.moves;
     if (this.moves > 0) {
-      // tap anywhere to skip the celebration
-      let skip = false;
-      const catcher = new Graphics().rect(0, 0, this.W, this.H).fill({ color: 0x000000, alpha: 0.001 });
-      catcher.eventMode = 'static';
-      catcher.on('pointerdown', () => (skip = true));
-      const hint = label('Geçmek için dokun', 26, { fill: 0xffffff });
-      hint.position.set(this.W / 2, this.board.y + this.board.H * this.board.S + 60);
-      hint.alpha = 0.8;
-      this.flyLayer.addChild(catcher, hint);
       const fromG = this.movesTxt.getGlobalPosition();
       this.timeScale = this.baseScale = 1.5;
-      await this.board.runBonus(this.moves, fromG, () => this.useMove(), () => skip);
+      await this.board.runBonus(this.moves, fromG, () => this.useMove());
       this.timeScale = this.baseScale = 1;
-      catcher.destroy();
-      hint.destroy();
     }
     await wait(0.3, 'ui');
     const s = getSave();
