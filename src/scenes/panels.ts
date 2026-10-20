@@ -1,14 +1,17 @@
 // Live-ops popups: daily reward, daily quests, weekly treasure road.
 import { Container, Graphics, Sprite } from 'pixi.js';
-import { tex, hasTex } from '../assets';
+import { tex, hasTex, jarTex, flagTex } from '../assets';
 import { label, Button, overlay } from '../ui';
-import { tween, Ease } from '../tween';
+import { tween, Ease, after } from '../tween';
 import { sfx } from '../audio';
 import {
   DAILY, dailyAvailable, dailyIndex, claimDaily, quests, questText, ROAD, road, grant, rewardText, Reward,
 } from '../liveops';
 import { getSave, save } from '../storage';
 import { cup, cupBoard, cupReward, cupTimeLeft } from '../liveops';
+import {
+  PIGGY_MIN, PIGGY_MAX, piggyBreak, chestProgress, openChest, CHEST_EVERY, raceState, startRace, raceReward, claimRace, RACE_TARGET,
+} from '../liveops';
 
 export interface PopupParts { root: Container; panel: Container; ph: number; pw: number; close: () => void }
 
@@ -269,4 +272,223 @@ export function cupPanel(parent: Container, W: number, H: number, onChange: () =
   const info = label(rw ? `Şu an ${myRank}. sıradasın · Ödül: ${rewardText(rw)}` : `Şu an ${myRank}. sıradasın · İlk 10'a gir!`, 19, INK);
   info.y = ph * 0.3;
   panel.addChild(info);
+}
+
+// ------------------------------------------------------------------ piggy bank
+export function piggyPanel(parent: Container, W: number, H: number, onChange: () => void) {
+  const { panel, ph, pw, close } = popup(parent, W, H, 'Hazine Kumbarası', onChange);
+  const s = getSave();
+  const k = s.piggy / PIGGY_MAX;
+  const jar = new Sprite(jarTex(k));
+  jar.anchor.set(0.5);
+  jar.scale.set(1.7);
+  jar.y = -ph * 0.17;
+  panel.addChild(jar);
+  const amount = label(`${s.piggy} altın`, 40, { fill: 0xffe066 });
+  amount.y = ph * 0.0;
+  const bar = progressBar(pw * 0.62, 30, k, 0xffcf3a);
+  bar.y = ph * 0.075;
+  const mark = new Graphics().rect(-2, -20, 4, 40).fill({ color: 0xffffff });
+  mark.position.set(-pw * 0.31 + pw * 0.62 * (PIGGY_MIN / PIGGY_MAX), ph * 0.075);
+  panel.addChild(amount, bar, mark);
+  const info = label(
+    s.piggy >= PIGGY_MAX ? 'Kumbara tamamen doldu!\nKırmazsan artık dolmaz.'
+      : s.piggy >= PIGGY_MIN ? 'Kırmaya hazır! İstersen bekle,\ndaha da dolsun (en fazla 1500).'
+        : `Her kazandığın seviye kumbarayı doldurur.\n${PIGGY_MIN} altında kırılabilir.`,
+    23, INK);
+  info.style.lineHeight = 32;
+  info.y = ph * 0.17;
+  panel.addChild(info);
+  const b = new Button(s.piggy >= PIGGY_MIN ? 'green' : 'red', 360, s.piggy >= PIGGY_MIN ? 'Kumbarayı Kır!' : 'Kapat', () => {
+    if (getSave().piggy < PIGGY_MIN) {
+      close();
+      return;
+    }
+    b.enabled = false;
+    // shake, crack, coin burst
+    const x0 = jar.x;
+    const shake = (n: number): Promise<void> =>
+      n <= 0 ? Promise.resolve() : tween(jar, { x: x0 + (n % 2 ? 10 : -10) }, 0.05).then(() => shake(n - 1));
+    sfx.crate();
+    shake(8).then(() => {
+      const got = piggyBreak();
+      sfx.barrel();
+      sfx.coin();
+      for (let i = 0; i < 24; i++) {
+        const c = new Sprite(tex('ic_coin'));
+        c.anchor.set(0.5);
+        c.scale.set(0.25);
+        c.position.set(jar.x, jar.y);
+        panel.addChild(c);
+        const a = Math.random() * Math.PI * 2, d = 120 + Math.random() * 160;
+        tween(c, { x: Math.cos(a) * d, y: jar.y + Math.sin(a) * d * 0.7 - 40 }, 0.5, Ease.outCubic, i * 0.01).then(() =>
+          tween(c, { alpha: 0 }, 0.3, Ease.inQuad, 0.3).then(() => c.destroy()));
+      }
+      tween(jar.scale, { x: 2.1, y: 1.3 }, 0.12).then(() => tween(jar, { alpha: 0 }, 0.2));
+      amount.text = `+${got} altın!`;
+      after(1.3, () => close(), 'ui');
+    });
+  }, 34);
+  b.y = ph * 0.32;
+  panel.addChild(b);
+}
+
+// ------------------------------------------------------------------ star chest
+export function chestPanel(parent: Container, W: number, H: number, onChange: () => void) {
+  const { root, panel, ph, pw, close } = popup(parent, W, H, 'Yıldız Sandığı', onChange);
+  const p = chestProgress();
+  const chest = safeIcon(hasTex('it_chest') ? 'it_chest' : 'ui_star', 190);
+  chest.y = -ph * 0.17;
+  panel.addChild(chest);
+  const t = label(p.ready ? 'Sandık hazır!' : `${p.have} / ${p.need} yıldız`, 36, INK);
+  t.y = ph * 0.0;
+  const bar = progressBar(pw * 0.62, 30, p.have / p.need, 0xffd23a);
+  bar.y = ph * 0.075;
+  const info = label(`Her ${CHEST_EVERY} yıldızda bir sandık açılır:\naltın, güçlendirici ve bazen kart paketi.`, 23, INK);
+  info.style.lineHeight = 32;
+  info.y = ph * 0.17;
+  panel.addChild(t, bar, info);
+  if (!p.ready) {
+    const c = new Button('red', 240, 'Kapat', close, 34);
+    c.y = ph * 0.32;
+    panel.addChild(c);
+    return;
+  }
+  const b = new Button('green', 280, 'Aç!', () => {
+    b.enabled = false;
+    sfx.crate();
+    const s0 = chest.scale.x;
+    tween(chest.scale, { x: s0 * 1.15, y: s0 * 0.85 }, 0.12).then(() => tween(chest.scale, { x: s0 * 1.3, y: s0 * 1.3 }, 0.2, Ease.outBack)).then(() => {
+      const r = openChest();
+      sfx.star();
+      sfx.coin();
+      const glow = new Sprite(tex('p_glow'));
+      glow.anchor.set(0.5);
+      glow.blendMode = 'add';
+      glow.tint = 0xffd060;
+      glow.scale.set(4);
+      glow.position.copyFrom(chest.position);
+      panel.addChildAt(glow, 1);
+      t.text = r ? rewardText(r) : '';
+      t.style.fontSize = 28;
+      b.visible = false;
+      after(1.8, () => {
+        if (root.destroyed) return;
+        if (chestProgress().ready) {
+          root.destroy({ children: true });
+          chestPanel(parent, W, H, onChange);
+        } else close();
+      }, 'ui');
+    });
+  }, 40);
+  b.y = ph * 0.32;
+  panel.addChild(b);
+}
+
+// ------------------------------------------------------------------ knights' race
+export function racePanel(parent: Container, W: number, H: number, onChange: () => void) {
+  const { panel, ph, pw, close } = popup(parent, W, H, 'Şövalye Yarışı', onChange);
+  const st = raceState();
+  if (!st || st.claimed) {
+    const fl = new Sprite(flagTex());
+    fl.anchor.set(0.5);
+    fl.scale.set(1.4);
+    fl.y = -ph * 0.18;
+    const t = label(`${RACE_TARGET} seviyeyi ilk bitiren kazanır!\n4 şövalyeye karşı 24 saat.`, 28, INK);
+    t.style.lineHeight = 38;
+    t.y = ph * 0.0;
+    const rw = label(`1.: ${rewardText(raceReward(1)!)}\n2.: ${rewardText(raceReward(2)!)} · 3.: ${rewardText(raceReward(3)!)}`, 20, { fill: 0x2f7a1a, stroke: 0xfff2d0, strokeW: 4, shadow: false });
+    rw.style.lineHeight = 28;
+    rw.y = ph * 0.13;
+    const b = new Button('green', 300, 'Yarışa Katıl', () => {
+      startRace();
+      close();
+      racePanel(parent, W, H, onChange);
+    }, 34);
+    b.y = ph * 0.3;
+    panel.addChild(fl, t, rw, b);
+    return;
+  }
+  const head = label(st.over ? 'Yarış bitti!' : `Kalan süre: ${Math.floor(st.left / 3600000)} sa ${Math.floor((st.left % 3600000) / 60000)} dk`, 26, INK);
+  head.y = -ph * 0.32;
+  panel.addChild(head);
+  // track: one lane per racer
+  st.racers.forEach((r, i) => {
+    const y = -ph * 0.22 + i * 82;
+    const lane = new Graphics().roundRect(-pw * 0.4, y - 32, pw * 0.8, 64, 18).fill({ color: r.me ? 0x2f6a1a : 0x3b2210, alpha: 0.9 }).stroke({ width: r.me ? 3 : 0, color: 0x9fe08a });
+    const medal = i < 3 ? [0xffd23a, 0xd8d8e0, 0xd08a4a][i] : 0x6a5040;
+    const rk = new Graphics().circle(-pw * 0.35, y, 18).fill({ color: medal });
+    const rt = label(String(i + 1), 20, { stroke: 0x3a1e0c });
+    rt.position.set(-pw * 0.35, y);
+    const nm = label(r.name, 20);
+    nm.anchor.set(0, 0.5);
+    nm.position.set(-pw * 0.3, y - 14);
+    const track = progressBar(pw * 0.5, 16, r.wins / RACE_TARGET, r.me ? 0x9fe08a : 0xffcf3a);
+    track.position.set(-pw * 0.3 + pw * 0.25, y + 14);
+    const n = label(`${r.wins}/${RACE_TARGET}`, 20, { fill: 0xffe066 });
+    n.position.set(pw * 0.32, y);
+    panel.addChild(lane, rk, rt, nm, track, n);
+    if (r.wins >= RACE_TARGET) {
+      const f = new Sprite(flagTex());
+      f.anchor.set(0.5);
+      f.scale.set(0.3);
+      f.position.set(pw * 0.25, y - 14);
+      panel.addChild(f);
+    }
+  });
+  if (st.over) {
+    const rw = raceReward(st.rank);
+    const t = label(rw ? `${st.rank}. oldun! Ödül: ${rewardText(rw)}` : `${st.rank}. oldun. Bir dahakine!`, 21, INK);
+    t.y = ph * 0.22;
+    const b = new Button('green', 280, rw ? 'Topla' : 'Tamam', () => {
+      claimRace();
+      if (rw) { sfx.coin(); sfx.star(); }
+      close();
+    }, 34);
+    b.y = ph * 0.32;
+    panel.addChild(t, b);
+  } else {
+    const t = label('Her kazandığın seviye seni 1 adım ilerletir.', 21, INK);
+    t.y = ph * 0.25;
+    panel.addChild(t);
+  }
+}
+
+// ------------------------------------------------------------------ statistics
+export function statsPanel(parent: Container, W: number, H: number) {
+  const { panel, ph, pw } = popup(parent, W, H, 'İstatistikler');
+  const s = getSave();
+  const st = s.stats;
+  const c = st.counts;
+  const total = st.wins + st.losses;
+  const rows: [string, string][] = [
+    ['Geçilen seviye', String(s.best)],
+    ['Kazanma oranı', total ? `%${Math.round((st.wins / total) * 100)} (${st.wins}/${total})` : '-'],
+    ['En uzun seri', String(st.bestStreak)],
+    ['En büyük kombo', st.bestCombo ? `x${st.bestCombo}` : '-'],
+    ['Patlatılan taş', String(c.tile ?? 0)],
+    ['Oluşturulan güçlendirici', String(c.power ?? 0)],
+    ['Güçlendirici kombosu', String(c.combo ?? 0)],
+    ['Kırılan sandık / taş', `${c.crate ?? 0} / ${c.stone ?? 0}`],
+  ];
+  rows.forEach(([k, v], i) => {
+    const y = -ph * 0.27 + i * 46;
+    const bg = new Graphics().roundRect(-pw * 0.4, y - 20, pw * 0.8, 40, 12).fill({ color: 0x3b2210, alpha: i % 2 ? 0.7 : 0.85 });
+    const a = label(k, 21);
+    a.anchor.set(0, 0.5);
+    a.position.set(-pw * 0.37, y);
+    const b = label(v, 22, { fill: 0xffe066 });
+    b.anchor.set(1, 0.5);
+    b.position.set(pw * 0.37, y);
+    panel.addChild(bg, a, b);
+  });
+  const worst = Object.entries(st.fails).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  const hy = -ph * 0.27 + rows.length * 46 + 14;
+  const head = label('En çok zorlandığın seviyeler', 22, INK);
+  head.y = hy;
+  panel.addChild(head);
+  const list = label(worst.length ? worst.map(([n, k]) => `${n} (${k} kez)`).join('  ·  ') : 'Henüz yok — harika gidiyorsun!', 20, { fill: 0x8e1d1d, stroke: 0xfff2d0, strokeW: 4, shadow: false });
+  list.y = hy + 34;
+  if (list.width > pw * 0.8) list.scale.set((pw * 0.8) / list.width);
+  panel.addChild(list);
 }

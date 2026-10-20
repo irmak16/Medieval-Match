@@ -9,9 +9,11 @@
 //  H V  arrow (horizontal/vertical)   B barrel   F falcon   O crystal orb
 //  i I  ice floor under a tile (1 / 2 hits)
 //  g  growing vines (spread when you don't clear vines in a move)   T treasure (bring it to the bottom)
+//  K  witch's cauldron (fills up with 4 hits, then boils over and hits everything around it)
+//  7 8 9 0  coloured crate (red / blue / green / yellow): only a match of its colour (or a power-up) breaks it
 import { EXTRA_LEVELS } from './levels_extra';
 
-export type GoalType = 'red' | 'blue' | 'green' | 'yellow' | 'purple' | 'crate' | 'stone' | 'chain' | 'vines' | 'gold' | 'ice';
+export type GoalType = 'red' | 'blue' | 'green' | 'yellow' | 'purple' | 'crate' | 'stone' | 'chain' | 'vines' | 'gold' | 'ice' | 'cauldron';
 export type Difficulty = 'normal' | 'hard' | 'superhard';
 export interface GoalDef { type: GoalType; count?: number }
 export interface LevelDef {
@@ -20,6 +22,8 @@ export interface LevelDef {
   items?: number;
   /** portals: [fromRow, fromCol, toRow, toCol] — tiles leaving the bottom of "from" enter the top of "to" */
   portals?: [number, number, number, number][];
+  /** conveyor belts: [row, direction] — after every move the row's tiles slide one cell (1 = right, -1 = left) */
+  belts?: [number, number][];
 }
 
 export const COLOR_GOALS: GoalType[] = ['red', 'blue', 'green', 'yellow', 'purple'];
@@ -222,6 +226,69 @@ const L: LevelDef[] = [
   // 60 · SUPER HARD: the dragon's lair (9x9)
   { diff: 'superhard', moves: 15, colors: 4, items: 1, goals: [{ type: 'gold' }, { type: 'vines' }, { type: 'stone' }, { type: 'ice' }, { type: 'crate' }], grid: [
     '.g.TTT.g.', '.........', 'cc.666.cc', '..I666I..', '..IIIII..', '2.......2', '22.....22', '222.O.222', 'iiiiiiiii'] },
+  // ---------------------------------------------------------------- 61-70: cauldrons, coloured crates, conveyor belts
+  // 61 · cauldron intro
+  { moves: 15, colors: 4, goals: [{ type: 'cauldron' }], grid: [
+    '........', '........', '........', '.K....K.', '........', '...KK...', '........', '........'] },
+  // 62 · cauldrons boil over the crates
+  { moves: 18, colors: 4, goals: [{ type: 'cauldron' }, { type: 'crate' }], grid: [
+    'x......x', '........', '..K..K..', '........', '11....11', '111..111', '1K1..1K1', '11111111'] },
+  // 63 · chain reaction ring
+  { moves: 15, colors: 4, goals: [{ type: 'cauldron' }, { type: 'yellow', count: 50 }], grid: [
+    '........', '........', '...KK...', '..K..K..', '..K..K..', '...KK...', '........', '........'] },
+  // 64 · coloured crates intro
+  { moves: 18, colors: 4, goals: [{ type: 'crate' }], grid: [
+    '........', '........', '........', '........', '........', '7..88..7', '77.88.77', '77788777'] },
+  // 65 · HARD: frozen colour vault
+  { diff: 'hard', moves: 16, colors: 4, goals: [{ type: 'crate' }, { type: 'ice' }, { type: 'yellow', count: 40 }], grid: [
+    '........', '........', '..9999..', '..9II9..', '..9II9..', '..9999..', '........', '00....00'] },
+  // 66 · relief: conveyor belt intro
+  { moves: 15, colors: 4, belts: [[4, 1]], goals: [{ type: 'blue', count: 40 }], grid: [
+    '........', '........', '........', '........', '........', '........', '........', '........'] },
+  // 67 · two belts over the crates
+  { moves: 16, colors: 4, belts: [[2, 1], [4, -1]], goals: [{ type: 'crate' }, { type: 'green', count: 60 }], grid: [
+    '........', '........', '........', '........', '........', '1......1', '22....22', '222..222'] },
+  // 68 · treasure rides the belts
+  { moves: 16, colors: 4, items: 2, belts: [[3, 1], [5, 1]], goals: [{ type: 'gold' }, { type: 'red', count: 50 }], grid: [
+    '..T..T..', '........', '........', '........', '........', '........', '........', 'x......x'] },
+  // 69 · cauldrons in the colour cellar
+  { moves: 18, colors: 4, goals: [{ type: 'cauldron' }, { type: 'crate' }], grid: [
+    '........', '........', '..K..K..', '........', '........', '8......7', '88.KK.77', '87788778'] },
+  // 70 · SUPER HARD: the alchemist's workshop
+  { diff: 'superhard', moves: 13, colors: 4, belts: [[2, 1], [3, -1]], goals: [{ type: 'cauldron' }, { type: 'ice' }, { type: 'crate' }, { type: 'red', count: 70 }], grid: [
+    '........', '.K....K.', '........', '...KK...', 'IIIIIIII', 'IIIIIIII', '9......0', '99K..K00'] },
+
+  // ---------------------------------------------------------------- 71-80: mixing it all
+  // 71 · relief: cauldron party
+  { moves: 15, colors: 4, goals: [{ type: 'cauldron' }, { type: 'blue', count: 60 }], grid: [
+    '........', '.K....K.', '........', 'K..BB..K', '........', '.K....K.', '........', '........'] },
+  // 72 · three belts (9x9)
+  { moves: 16, colors: 5, belts: [[2, 1], [4, -1], [6, 1]], goals: [{ type: 'yellow', count: 60 }, { type: 'red', count: 60 }], grid: [
+    'x.......x', '.........', '.........', '.........', '.........', '.........', '.........', '.........', 'x.......x'] },
+  // 73 · four-colour wall (9x8)
+  { moves: 16, colors: 4, goals: [{ type: 'crate' }], grid: [
+    '.........', '.........', '.........', '0.......7', '00.9.8.77', '.........', '7..8.9..0', '77.898.00'] },
+  // 74 · belts between the chains
+  { moves: 15, colors: 4, belts: [[3, 1], [5, -1]], goals: [{ type: 'chain' }, { type: 'yellow', count: 60 }], grid: [
+    'c......c', '........', 'cc.cc.cc', '........', '.cccccc.', '........', 'cc.cc.cc', '........'] },
+  // 75 · HARD: cauldrons in the stone hall
+  { diff: 'hard', moves: 17, colors: 4, goals: [{ type: 'cauldron' }, { type: 'stone' }, { type: 'green', count: 50 }], grid: [
+    '........', '........', '.5K..K5.', '.5....5.', '.5....5.', '.5K..K5.', '.55..55.', '........'] },
+  // 76 · relief: orbs on the belts
+  { moves: 16, colors: 5, belts: [[2, -1], [5, 1]], goals: [{ type: 'green', count: 60 }, { type: 'purple', count: 60 }], grid: [
+    '........', '........', '........', '...OO...', '........', '........', '........', '........'] },
+  // 77 · coloured crates in the thorns
+  { moves: 15, colors: 4, goals: [{ type: 'crate' }, { type: 'vines' }], grid: [
+    'g......g', '........', '........', '..8..9..', '........', '........', '8.9..8.9', 'gg8998gg'] },
+  // 78 · frozen potion room (9x9)
+  { moves: 20, colors: 4, goals: [{ type: 'cauldron' }, { type: 'ice' }, { type: 'red', count: 40 }], grid: [
+    '.........', '.........', '...K.K...', '..IIIII..', '..KIIIK..', '..IIIII..', '...K.K...', '.........', 'IIIIIIIII'] },
+  // 79 · HARD: the sorting belts
+  { diff: 'hard', moves: 13, colors: 4, belts: [[2, 1], [4, -1]], goals: [{ type: 'crate' }, { type: 'blue', count: 70 }], grid: [
+    '........', '........', '........', '7......8', '77....88', '8......7', '78.99.87', '87788778'] },
+  // 80 · SUPER HARD: the wizard's tower (9x9)
+  { diff: 'superhard', moves: 13, colors: 4, belts: [[2, 1], [4, -1]], goals: [{ type: 'gold' }, { type: 'cauldron' }, { type: 'crate' }, { type: 'ice' }, { type: 'vines' }], grid: [
+    'g..TTT..g', '.........', '.........', '.K..K..K.', '.........', '7.cc.cc.8', '77.....88', '7K.....K8', 'IIIIIIIII'] },
 ];
 
 /** Deterministic pseudo-random generator for endless levels after the hand-made ones. */

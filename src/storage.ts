@@ -16,6 +16,18 @@ export interface SaveData {
   cup: { week: string; score: number; claimed: string[] };
   lives: { n: number; t: number }; // current lives and timestamp when the next one started regenerating
   rescue: { done: number; nextAt: number }; // Pip rescue mini-game progress
+  piggy: number; // coins collected in the piggy bank
+  chest: number; // star chests already opened
+  race: { start: number; wins: number; done: number; seed: number; claimed: boolean } | null; // knights' race
+  stats: Stats;
+  gfx: 'auto' | 'low' | 'high';
+  symbols: boolean; // colour-blind helper shapes on tiles
+}
+
+export interface Stats {
+  wins: number; losses: number; starsEarned: number; bestStreak: number; bestCombo: number;
+  counts: Record<string, number>; // tiles, powers, crates… cleared
+  fails: Record<string, number>; // per level: times given up
 }
 
 const KEY = 'medieval-match-save-v1';
@@ -30,6 +42,12 @@ const DEFAULTS: SaveData = {
   cup: { week: '', score: 0, claimed: [] },
   lives: { n: 5, t: 0 },
   rescue: { done: 0, nextAt: 6 },
+  piggy: 0,
+  chest: 0,
+  race: null,
+  stats: { wins: 0, losses: 0, starsEarned: 0, bestStreak: 0, bestCombo: 0, counts: {}, fails: {} },
+  gfx: 'auto',
+  symbols: false,
 };
 
 let data: SaveData = structuredClone(DEFAULTS);
@@ -44,8 +62,11 @@ export function loadSave(): SaveData {
     data.inv = { ...DEFAULTS.inv, ...data.inv };
     data.album = { ...structuredClone(DEFAULTS.album), ...data.album };
     data.lives = { ...DEFAULTS.lives, ...data.lives };
+    data.stats = { ...structuredClone(DEFAULTS.stats), ...data.stats };
     if (!Array.isArray(data.seen)) data.seen = [];
     data.best = Math.max(data.best ?? 0, data.level - 1);
+    // older saves: count already finished levels as earned stars
+    if (!data.stats.starsEarned && data.best > 0) data.stats.starsEarned = data.best;
   } catch {
     /* storage unavailable: play without saving */
   }

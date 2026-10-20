@@ -1,13 +1,13 @@
-import { Container, Graphics, Sprite } from 'pixi.js';
+import { Container, Graphics, Sprite, Texture } from 'pixi.js';
 import { getLevel } from '../levels';
-import { tex, COLOR_TEX } from '../assets';
+import { tex, COLOR_TEX, jarTex, flagTex, chartTex } from '../assets';
 import { label, Button, iconButton, Counter, overlay } from '../ui';
 import { tween, Ease, fadeUpAndDestroy } from '../tween';
 import { getSave, save, DEV } from '../storage';
 import { updateMusic } from '../audio';
 import type { App } from '../main';
-import { dailyAvailable, questsClaimable, roadClaimable, streakBonus, lives, nextLifeIn, MAX_LIVES, refillLives, REFILL_COST, cup } from '../liveops';
-import { dailyPanel, questsPanel, roadPanel, cupPanel, popup } from './panels';
+import { dailyAvailable, questsClaimable, roadClaimable, streakBonus, lives, nextLifeIn, MAX_LIVES, refillLives, REFILL_COST, cup, PIGGY_MIN, PIGGY_MAX, chestProgress, raceBadge } from '../liveops';
+import { dailyPanel, questsPanel, roadPanel, cupPanel, popup, piggyPanel, chestPanel, racePanel, statsPanel } from './panels';
 import { rescueAvailable } from './rescue';
 import { Pip, hasPip } from '../mascot';
 import { hasTex } from '../assets';
@@ -93,9 +93,26 @@ export class MenuScene extends Container {
     this.coinCounter.position.set(275, 60);
     const stars = new Counter('ui_star', s.stars, 140);
     stars.position.set(448, 60);
+    stars.eventMode = 'static';
+    stars.cursor = 'pointer';
+    stars.on('pointertap', () => chestPanel(this, W, H, () => this.app.showMenu()));
+    // star chest progress under the star counter
+    const cp = chestProgress();
+    const chestBar = new Graphics()
+      .roundRect(400, 88, 110, 12, 6).fill({ color: 0x2a160a, alpha: 0.85 })
+      .roundRect(402, 90, Math.max(8, 106 * Math.min(1, cp.have / cp.need)), 8, 4).fill({ color: cp.ready ? 0x5fe05a : 0xffd23a });
+    this.addChild(chestBar);
     const gear = iconButton('ic_gear', 84, () => this.openSettings());
     gear.position.set(W - 60, 60);
     this.addChild(hearts, this.heartTimer, this.coinCounter, stars, gear);
+    if (cp.ready) {
+      const badge = new Container();
+      badge.addChild(new Graphics().circle(0, 0, 15).fill({ color: 0xd62020 }).stroke({ width: 3, color: 0xffffff }));
+      badge.addChild(label('!', 20));
+      badge.position.set(505, 38);
+      this.addChild(badge);
+      this.sideButtons.push({ badge, check: () => chestProgress().ready });
+    }
 
     // side buttons (right: events, left: castle + levels)
     const refresh = () => this.refreshBadges();
@@ -118,6 +135,8 @@ export class MenuScene extends Container {
       }
     }, () => (rescueAvailable() ? 1 : 0));
     this.side(70, sy(3), 'ic_lock', 'Harita', () => this.app.showLevels(), () => 0);
+    this.side(W - 70, sy(4), flagTex(), 'Yarış', () => racePanel(this, W, H, refresh), () => raceBadge());
+    this.side(70, sy(4), jarTex(s.piggy / PIGGY_MAX), 'Kumbara', () => piggyPanel(this, W, H, () => this.app.showMenu()), () => (getSave().piggy >= PIGGY_MIN ? 1 : 0));
     this.refreshBadges();
 
     // win streak indicator
@@ -210,7 +229,7 @@ export class MenuScene extends Container {
     panel.addChild(c);
   }
 
-  private side(x: number, y: number, icon: string, text: string, onTap: () => void, check: () => number) {
+  private side(x: number, y: number, icon: string | Texture, text: string, onTap: () => void, check: () => number) {
     const b = iconButton(icon, 92, onTap);
     b.position.set(x, y);
     const t = label(text, 21);
@@ -261,27 +280,48 @@ export class MenuScene extends Container {
     const panel = new Container();
     const p = new Sprite(tex('ui_popup'));
     p.anchor.set(0.5);
-    p.scale.set(Math.min(600, this.W - 60) / p.texture.width);
+    p.scale.set(Math.min(640, this.W - 40) / p.texture.width);
     const ph = p.height;
     panel.addChild(p);
     const title = label('Ayarlar', 46, { fill: 0xfff2c8, stroke: 0x5a0a0a });
     title.y = -ph / 2 + ph * 0.073;
     panel.addChild(title);
-    const mk = (y: number, text: () => string, fn: () => void) => {
-      const b: Button = new Button('green', 280, text(), () => {
+    const mk = (x: number, y: number, w: number, text: () => string, fn: () => void) => {
+      const b: Button = new Button('green', w, text(), () => {
         fn();
         panel.removeChild(b);
         b.destroy({ children: true });
-        panel.addChild(mk(y, text, fn));
-      }, 32);
-      b.y = y;
+        panel.addChild(mk(x, y, w, text, fn));
+      }, 27);
+      b.position.set(x, y);
+      b.setBaseScale(0.8);
       return b;
     };
+    const gfxName = { auto: 'Otomatik', low: 'Düşük', high: 'Yüksek' } as const;
     panel.addChild(
-      mk(-ph * 0.24, () => `Ses: ${s.sound ? 'Açık' : 'Kapalı'}`, () => { s.sound = !s.sound; save(); }),
-      mk(-ph * 0.11, () => `Müzik: ${s.music ? 'Açık' : 'Kapalı'}`, () => { s.music = !s.music; save(); updateMusic(); }),
+      mk(-140, -ph * 0.26, 300, () => `Ses: ${s.sound ? 'Açık' : 'Kapalı'}`, () => { s.sound = !s.sound; save(); }),
+      mk(140, -ph * 0.26, 300, () => `Müzik: ${s.music ? 'Açık' : 'Kapalı'}`, () => { s.music = !s.music; save(); updateMusic(); }),
+      mk(-140, -ph * 0.14, 300, () => `Şekiller: ${s.symbols ? 'Açık' : 'Kapalı'}`, () => {
+        s.symbols = !s.symbols;
+        save();
+        if (s.symbols) this.toast('Taşlara renk körleri için şekil eklendi');
+      }),
+      mk(140, -ph * 0.14, 300, () => `Grafik: ${gfxName[s.gfx]}`, () => {
+        s.gfx = s.gfx === 'auto' ? 'low' : s.gfx === 'low' ? 'high' : 'auto';
+        save();
+        this.toast('Grafik ayarı yeniden açılışta tam uygulanır');
+      }),
     );
-    const exp = new Button('green', 280, 'Kayıt Kodu Al', () => {
+    const st = new Button('green', 400, 'İstatistikler', () => statsPanel(root, this.W, this.H), 30);
+    st.y = ph * 0.01;
+    st.setBaseScale(0.8);
+    const stIc = new Sprite(chartTex());
+    stIc.anchor.set(0.5);
+    stIc.scale.set(0.38);
+    stIc.position.set(-150, -4);
+    st.addChild(stIc);
+    panel.addChild(st);
+    const exp = new Button('green', 300, 'Kayıt Kodu Al', () => {
       const code = exportCode();
       try {
         navigator.clipboard?.writeText(code);
@@ -289,17 +329,19 @@ export class MenuScene extends Container {
         /* ignore */
       }
       window.prompt('İlerleme kodun (kopyalandı). Diğer cihazda "Kodu Yükle" ile kullan:', code);
-    }, 28);
-    exp.y = ph * 0.02;
-    const imp = new Button('green', 280, 'Kodu Yükle', () => {
+    }, 27);
+    exp.position.set(-140, ph * 0.15);
+    exp.setBaseScale(0.8);
+    const imp = new Button('green', 300, 'Kodu Yükle', () => {
       const code = window.prompt('Kayıt kodunu yapıştır:');
       if (!code) return;
       if (importCode(code)) {
         root.destroy({ children: true });
         this.app.showMenu();
       } else window.alert('Kod geçersiz.');
-    }, 28);
-    imp.y = ph * 0.15;
+    }, 27);
+    imp.position.set(140, ph * 0.15);
+    imp.setBaseScale(0.8);
     panel.addChild(exp, imp);
     const close = new Button('red', 260, 'Kapat', () => root.destroy({ children: true }), 34);
     close.y = ph * 0.31;

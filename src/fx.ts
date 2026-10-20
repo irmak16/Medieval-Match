@@ -28,7 +28,16 @@ interface P {
 }
 
 /** Fewer particles on low-end devices. */
-export const LOW_END = typeof navigator !== 'undefined' && ((navigator.hardwareConcurrency || 8) <= 4 || ((navigator as any).deviceMemory || 8) <= 3);
+function gfxSetting(): string {
+  try {
+    return JSON.parse(localStorage.getItem('medieval-match-save-v1') || '{}').gfx || 'auto';
+  } catch {
+    return 'auto';
+  }
+}
+const GFX = gfxSetting();
+export const LOW_END = GFX === 'low' ? true : GFX === 'high' ? false :
+  typeof navigator !== 'undefined' && ((navigator.hardwareConcurrency || 8) <= 4 || ((navigator as any).deviceMemory || 8) <= 3);
 const MAX_PARTICLES = LOW_END ? 420 : 900;
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 

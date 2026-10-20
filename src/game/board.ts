@@ -1,5 +1,5 @@
 import { Container, Graphics, Sprite, Rectangle, FederatedPointerEvent, Point } from 'pixi.js';
-import { tex, hasTex, COLOR_TEX, COLOR_TINT, iceTex } from '../assets';
+import { tex, hasTex, COLOR_TEX, COLOR_TINT, iceTex, cauldronTex, symbolTex } from '../assets';
 import { FX } from '../fx';
 import { tween, Ease, after, pendingTimers, clearTimers, killTweens } from '../tween';
 import { sfx } from '../audio';
@@ -8,7 +8,7 @@ import { LevelDef, GoalType, COLOR_GOALS } from '../levels';
 export type Kind = 'c' | 'ah' | 'av' | 'barrel' | 'falcon' | 'orb' | 'gold';
 export type BoosterKind = 'hammer' | 'row' | 'col' | 'shuffle';
 type TState = 'idle' | 'fall' | 'swap' | 'spawn';
-type BlockType = 'crate' | 'stone' | 'vines';
+type BlockType = 'crate' | 'stone' | 'vines' | 'cauldron';
 
 const G = 58; // gravity in cells/s^2
 const VMAX = 17; // max fall speed in cells/s
@@ -25,6 +25,7 @@ export class Tile {
   stamp = 0; // last time this tile was moved by the player / landed (for power-up placement)
   view = new Container();
   spr: Sprite;
+  sym: Sprite | null = null;
   glow: Sprite | null = null;
   phase = Math.random() * 10;
   hinted = false;
@@ -41,7 +42,7 @@ export class Tile {
   }
 }
 
-interface Blocker { type: BlockType; hp: number; spr: Sprite; grow?: boolean }
+interface Blocker { type: BlockType; hp: number; spr: Sprite; grow?: boolean; color?: number; badge?: Sprite }
 interface Cell { ok: boolean; blocker: Blocker | null; chain: Sprite | null; tile: Tile | null; ice: { hp: number; spr: Sprite } | null }
 
 interface Projectile { update(dt: number): boolean } // returns false when finished
@@ -96,6 +97,9 @@ export class Board extends Container {
   private itemsLeft = 0; // collectible items still to spawn
   private portals: { from: [number, number]; to: [number, number] }[] = [];
   private bias = 0; // spawn bias: >0 helps the player, <0 hinders (sawtooth difficulty)
+  private belts: { row: number; dir: number; arrows: Container }[] = [];
+  /** colour-blind mode: draw a small shape on every tile */
+  static symbols = false;
   pendingBooster: BoosterKind | null = null;
   onBoosterUsed: ((k: BoosterKind) => void) | null = null;
 
@@ -136,6 +140,8 @@ export class Board extends Container {
         else if ('456'.includes(ch)) this.addBlocker(r, c, 'stone', +ch - 3);
         else if (ch === 'v') this.addBlocker(r, c, 'vines', 1);
         else if (ch === 'g') this.addBlocker(r, c, 'vines', 1, true);
+        else if (ch === 'K') this.addBlocker(r, c, 'cauldron', 4);
+        else if ('7890'.includes(ch)) this.addBlocker(r, c, 'crate', 1, false, '7890'.indexOf(ch));
         else {
           let kind: Kind = 'c';
           if (ch === 'H') kind = 'ah';
@@ -161,6 +167,7 @@ export class Board extends Container {
       this.drawPortal(pr[0] + 1, pr[1], 0xb070ff); // entrance: bottom edge of the cell
       this.drawPortal(pr[2], pr[3], 0x70d0ff); // exit: top edge of the cell
     }
+    for (const [row, dir] of def.belts ?? []) this.addBelt(row, dir);
 
     // --- input
     this.eventMode = 'static';
@@ -215,6 +222,19 @@ export class Board extends Container {
     t.spr.scale.set((S * scale) / t.spr.texture.width);
     t.spr.rotation = kind === 'av' ? -Math.PI / 2 : 0;
     t.spr.position.set(0, 0);
+    if (Board.symbols && kind === 'c') {
+      if (!t.sym) {
+        t.sym = new Sprite();
+        t.sym.anchor.set(0.5);
+        t.view.addChild(t.sym);
+      }
+      t.sym.texture = symbolTex(color);
+      t.sym.scale.set((S * 0.36) / 64);
+      t.sym.position.set(S * 0.26, S * 0.26);
+    } else if (t.sym) {
+      t.sym.destroy();
+      t.sym = null;
+    }
     if (t.isPower && !t.glow) {
       t.glow = new Sprite(tex('p_glow'));
       t.glow.anchor.set(0.5);
@@ -243,12 +263,20 @@ export class Board extends Container {
     return opts[rnd(opts.length)];
   }
 
-  private addBlocker(r: number, c: number, type: BlockType, hp: number, grow = false) {
+  private addBlocker(r: number, c: number, type: BlockType, hp: number, grow = false, color?: number) {
     const spr = new Sprite();
     spr.anchor.set(0.5);
     spr.position.set((c + 0.5) * this.S, (r + 0.5) * this.S);
     this.blockLayer.addChild(spr);
-    const b: Blocker = { type, hp, spr, grow };
+    const b: Blocker = { type, hp, spr, grow, color };
+    if (color !== undefined) {
+      // the colour gem nailed onto the crate
+      const badge = new Sprite(tex(COLOR_TEX[color]));
+      badge.anchor.set(0.5);
+      badge.scale.set((this.S * 0.46) / badge.texture.width);
+      spr.addChild(badge);
+      b.badge = badge;
+    }
     this.grid[r][c].blocker = b;
     this.styleBlocker(b);
   }
@@ -266,9 +294,17 @@ export class Board extends Container {
       name = hasTex('ob_vines_grow') ? 'ob_vines_grow' : 'ob_vines';
       if (name === 'ob_vines') tint = 0xc8ff8a;
     }
+    if (b.type === 'cauldron') {
+      b.spr.texture = cauldronTex(4 - b.hp);
+      b.spr.tint = 0xffffff;
+      b.spr.scale.set((this.S * 0.98) / 128);
+      return;
+    }
+    if (b.color !== undefined) name = 'ob_crate1'; // (children inherit tint, so the wood stays natural)
     b.spr.texture = tex(name);
     b.spr.tint = tint;
     b.spr.scale.set((this.S * 0.98) / b.spr.texture.width);
+    if (b.badge) b.badge.scale.set((this.S * 0.46) / b.badge.texture.width / b.spr.scale.x);
   }
 
   private addIce(r: number, c: number, hp: number) {
@@ -412,6 +448,90 @@ export class Board extends Container {
       tween(glow, { alpha: 0.35 }, 0.6, Ease.inOutQuad).then(() => tween(glow, { alpha: 1 }, 0.6, Ease.inOutQuad).then(loop));
     };
     loop();
+  }
+
+  /** Conveyor belt under a row: animated chevrons show the direction. */
+  private addBelt(row: number, dir: number) {
+    const S = this.S;
+    const strip = new Graphics();
+    for (let c = 0; c < this.W; c++) {
+      if (!this.grid[row][c].ok) continue;
+      strip.roundRect(c * S + 1.5, row * S + 1.5, S - 3, S - 3, S * 0.13).fill({ color: 0x3d4250, alpha: 0.9 });
+      strip.rect(c * S, row * S + S * 0.08, S, S * 0.06).fill({ color: 0x9aa0b0, alpha: 0.7 });
+      strip.rect(c * S, row * S + S * 0.86, S, S * 0.06).fill({ color: 0x9aa0b0, alpha: 0.7 });
+    }
+    this.bgLayer.addChild(strip);
+    // bright arrow tabs at both ends of the row (drawn above the tiles)
+    const okCols = [...Array(this.W).keys()].filter((c) => this.grid[row][c].ok);
+    for (const c of [okCols[0], okCols[okCols.length - 1]]) {
+      const m = new Graphics();
+      const w = S * 0.11 * dir;
+      m.moveTo(-w, -S * 0.16).lineTo(w, 0).lineTo(-w, S * 0.16).closePath()
+        .fill({ color: 0xffd23a }).stroke({ width: S * 0.03, color: 0x5a2e0e, join: 'round' });
+      m.position.set(c === okCols[0] ? c * S + S * 0.2 : (c + 1) * S - S * 0.2, (row + 0.5) * S);
+      this.chainLayer.addChild(m);
+    }
+    const arrows = new Container();
+    const g = new Graphics();
+    for (let k = -2; k < this.W + 2; k++) {
+      const x = (k + 0.5) * S, y = (row + 0.5) * S, w = S * 0.16 * dir;
+      g.moveTo(x - w, y - S * 0.3).lineTo(x + w, y).lineTo(x - w, y + S * 0.3);
+    }
+    g.stroke({ width: S * 0.07, color: 0xffd27a, alpha: 0.5, cap: 'round', join: 'round' });
+    arrows.addChild(g);
+    const mask = new Graphics();
+    for (let c = 0; c < this.W; c++) if (this.grid[row][c].ok) mask.rect(c * S, row * S, S, S);
+    mask.fill(0xffffff);
+    arrows.mask = mask;
+    this.bgLayer.addChild(arrows, mask);
+    this.belts.push({ row, dir, arrows });
+  }
+
+  /** After a move every belt slides its row by one cell (tiles wrap around the ends). */
+  private runBelts() {
+    const S = this.S;
+    let moved = false;
+    for (const b of this.belts) {
+      const cols: number[] = [];
+      for (let c = 0; c < this.W; c++) {
+        const cl = this.grid[b.row][c];
+        if (cl.ok && !cl.blocker && !cl.chain && cl.tile && cl.tile.state === 'idle') cols.push(c);
+      }
+      const n = cols.length;
+      if (n < 2) continue;
+      moved = true;
+      const tiles = cols.map((c) => this.grid[b.row][c].tile!);
+      for (const c of cols) this.grid[b.row][c].tile = null;
+      tiles.forEach((t, i) => {
+        const j = (i + b.dir + n) % n;
+        const dest = cols[j];
+        this.place(t, b.row, dest);
+        t.state = 'swap';
+        this.busy++;
+        const wrap = (b.dir > 0 && j < i) || (b.dir < 0 && j > i);
+        const done = () => {
+          this.busy--;
+          t.x = dest;
+          if (t.state === 'swap') t.state = 'idle';
+          t.stamp = ++this.stamp;
+          this.changed = true;
+        };
+        if (!wrap) {
+          tween(t, { x: dest }, 0.28, Ease.inOutQuad).then(done);
+        } else {
+          // slide out of one end, come back in at the other
+          tween(t, { x: cols[i] + b.dir }, 0.14, Ease.inQuad).then(() => {
+            t.x = dest - b.dir;
+            return tween(t, { x: dest }, 0.14, Ease.outQuad);
+          }).then(done);
+        }
+      });
+      const a = b.arrows;
+      killTweens(a);
+      a.x = 0;
+      tween(a, { x: S * b.dir }, 0.28, Ease.inOutQuad).then(() => (a.x = 0));
+    }
+    if (moved) sfx.swap();
   }
 
   /** If an empty cell in column c (at row r) is fed by a portal, return that portal. */
@@ -568,6 +688,7 @@ export class Board extends Container {
 
   /** Called once the cascade of a player move has fully settled. */
   private endOfMove() {
+    if (this.belts.length) this.runBelts();
     if (this.vinesBroken) return;
     const growers: [number, number][] = [];
     for (let r = 0; r < this.H; r++) for (let c = 0; c < this.W; c++) if (this.grid[r][c].blocker?.grow) growers.push([r, c]);
@@ -935,11 +1056,20 @@ export class Board extends Container {
     const ar = g.anchor.r, ac = g.anchor.c;
     const damaged = new Set<string>();
     const inGroup = new Set(g.cells.map((t) => `${t.r},${t.c}`));
+    const gColor = g.cells[0].color;
     for (const t of g.cells) {
       for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
         const k = `${t.r + dr},${t.c + dc}`;
         if (inGroup.has(k) || damaged.has(k)) continue;
         const cl = this.cell(t.r + dr, t.c + dc);
+        if (cl?.blocker && cl.blocker.color !== undefined && cl.blocker.color !== gColor) {
+          // wrong colour: the crate just wobbles
+          damaged.add(k);
+          const sp = cl.blocker.spr;
+          killTweens(sp);
+          tween(sp, { rotation: 0.12 }, 0.06).then(() => tween(sp, { rotation: 0 }, 0.3, Ease.outElastic));
+          continue;
+        }
         if (cl?.blocker) {
           damaged.add(k);
           this.damageBlocker(t.r + dr, t.c + dc);
@@ -1024,7 +1154,14 @@ export class Board extends Container {
     this.changed = true;
     const x = (c + 0.5) * this.S, y = (r + 0.5) * this.S;
     b.hp--;
-    if (b.type === 'crate') { sfx.crate(); this.fx.debris(x, y, 'wood', b.hp > 0 ? 4 : 8); }
+    if (b.type === 'cauldron') {
+      sfx.zap();
+      this.fx.sparkleBurst(x, y - this.S * 0.25, 4 + (4 - b.hp) * 3, 0xa8ff5a, 2.5);
+      if (b.hp <= 0) {
+        this.boilOver(r, c, b);
+        return;
+      }
+    } else if (b.type === 'crate') { sfx.crate(); this.fx.debris(x, y, 'wood', b.hp > 0 ? 4 : 8); }
     else if (b.type === 'stone') { sfx.stone(); this.fx.debris(x, y, 'stone', b.hp > 0 ? 4 : 8); }
     else { sfx.vines(); this.fx.debris(x, y, 'leaf', 8); }
     if (b.hp > 0) {
@@ -1038,6 +1175,7 @@ export class Board extends Container {
     if (b.type === 'vines') this.vinesBroken = true;
     this.hooks.stat?.(b.type);
     const goal: GoalType = b.type;
+    if (b.badge) tween(b.badge, { alpha: 0 }, 0.1);
     if (this.hooks.wantsGoal(goal)) {
       const g = this.toGlobal(new Point(x, y));
       this.hooks.collect(goal, g.x, g.y, b.type === 'crate' ? 'ob_crate1' : b.type === 'stone' ? 'ob_stone1' : 'ob_vines');
@@ -1050,6 +1188,35 @@ export class Board extends Container {
       tween(b.spr, { alpha: 0 }, 0.15);
       tween(b.spr.scale, { x: s * 0.6, y: s * 0.6 }, 0.15).then(() => b.spr.destroy());
     });
+  }
+
+  /** A full cauldron boils over: it vanishes and splashes every cell around it. */
+  private boilOver(r: number, c: number, b: Blocker) {
+    const cl = this.grid[r][c];
+    cl.blocker = null;
+    this.changed = true;
+    const x = (c + 0.5) * this.S, y = (r + 0.5) * this.S;
+    this.hooks.stat?.('cauldron');
+    if (this.hooks.wantsGoal('cauldron')) {
+      const g = this.toGlobal(new Point(x, y));
+      this.hooks.collect('cauldron', g.x, g.y, '__cauldron');
+    }
+    sfx.barrel();
+    Board.buzz(30);
+    this.hooks.impact?.(1);
+    this.fx.flash(x, y, this.S * 3.2, 0x9dff6a, 0.4);
+    this.fx.sparkleBurst(x, y, 26, 0xb8ff7a, 6);
+    this.fx.shake(this.S * 0.1, 0.25);
+    const sp = b.spr;
+    tween(sp.scale, { x: sp.scale.x * 1.35, y: sp.scale.y * 0.7 }, 0.1).then(() => {
+      tween(sp, { alpha: 0 }, 0.18);
+      tween(sp.scale, { x: sp.scale.x * 0.5, y: sp.scale.y * 1.6 }, 0.18).then(() => sp.destroy());
+    });
+    for (let dr = -1; dr <= 1; dr++)
+      for (let dc = -1; dc <= 1; dc++) {
+        if (!dr && !dc) continue;
+        after(0.08, () => this.hitCell(r + dr, c + dc), 'board');
+      }
   }
 
   private breakChain(r: number, c: number) {

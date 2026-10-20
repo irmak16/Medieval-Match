@@ -114,6 +114,8 @@ export function quests() {
 }
 
 export function trackQuest(key: string, n = 1) {
+  const c = getSave().stats.counts; // lifetime statistics (saved together with the level result)
+  c[key] = (c[key] ?? 0) + n;
   const list = quests();
   let changed = false;
   for (const q of list) if (q.key === key && q.progress < q.target) {
@@ -291,4 +293,123 @@ export function refillLives(): boolean {
   s.lives = { n: MAX_LIVES, t: 0 };
   save();
   return true;
+}
+
+// ------------------------------------------------------------------ piggy bank (Hazine Kumbarası)
+export const PIGGY_MIN = 400; // can be broken from here
+export const PIGGY_MAX = 1500; // stops filling here
+export function piggyAdd(diff: 'normal' | 'hard' | 'superhard', leftMoves: number): number {
+  const s = getSave();
+  const add = (diff === 'superhard' ? 90 : diff === 'hard' ? 60 : 30) + Math.min(10, leftMoves) * 3;
+  const before = s.piggy;
+  s.piggy = Math.min(PIGGY_MAX, s.piggy + add);
+  save();
+  return s.piggy - before;
+}
+export function piggyBreak(): number {
+  const s = getSave();
+  if (s.piggy < PIGGY_MIN) return 0;
+  const n = s.piggy;
+  s.piggy = 0;
+  s.coins += n;
+  save();
+  return n;
+}
+
+// ------------------------------------------------------------------ star chest (every few earned stars)
+export const CHEST_EVERY = 10;
+export function chestProgress(): { have: number; need: number; ready: number } {
+  const s = getSave();
+  const earned = s.stats.starsEarned;
+  const ready = Math.max(0, Math.floor(earned / CHEST_EVERY) - s.chest);
+  return { have: ready > 0 ? CHEST_EVERY : earned - s.chest * CHEST_EVERY, need: CHEST_EVERY, ready };
+}
+export function openChest(): Reward | null {
+  const s = getSave();
+  if (chestProgress().ready <= 0) return null;
+  s.chest += 1;
+  const k = s.chest;
+  const boosters: Reward[] = [{ hammer: 1 }, { row: 1 }, { col: 1 }, { shuffle: 1 }];
+  const r: Reward = { coins: 150 + (k % 3) * 50, ...boosters[k % 4] };
+  if (k % 2 === 0) r.packs = 1;
+  grant(r);
+  return r;
+}
+
+// ------------------------------------------------------------------ knights' race (Şövalye Yarışı) vs 4 bots
+export const RACE_TARGET = 7;
+const RACE_MS = 24 * 3600 * 1000;
+const RACERS = ['Sir Kaan', 'Leydi Elif', 'Baron Efe', 'Okçu Deniz', 'Prens Arda', 'Simyacı Nil', 'Avcı Yağmur', 'Kont Mert'];
+
+export interface Racer { name: string; wins: number; finish: number; me?: boolean }
+
+/** Bots finish the race at different times (between ~4 and ~30 hours). */
+function botFinish(seed: number, i: number): number {
+  const h = hash(`${seed}-${i}`);
+  const hours = [6, 10, 15, 22, 30][i] * (0.8 + ((h % 1000) / 1000) * 0.5);
+  return hours * 3600 * 1000;
+}
+
+export function raceState(now = Date.now()) {
+  const r = getSave().race;
+  if (!r) return null;
+  const end = r.done || r.start + RACE_MS;
+  const elapsed = Math.min(now, end) - r.start;
+  const names = [...RACERS].sort((a, b) => hash(r.seed + a) - hash(r.seed + b)).slice(0, 4);
+  const racers: Racer[] = names.map((name, i) => {
+    const T = botFinish(r.seed, i);
+    const wins = Math.min(RACE_TARGET, Math.floor((RACE_TARGET * Math.min(elapsed, T)) / T));
+    return { name, wins, finish: r.start + T };
+  });
+  racers.push({ name: 'Sen', wins: r.wins, finish: r.done || Infinity, me: true });
+  racers.sort((a, b) => b.wins - a.wins || a.finish - b.finish);
+  const botsDone = racers.filter((x) => !x.me && x.wins >= RACE_TARGET).length;
+  const over = r.done > 0 || elapsed >= RACE_MS || botsDone >= 3;
+  const rank = racers.findIndex((x) => x.me) + 1;
+  return { racers, over, rank, left: Math.max(0, RACE_MS - elapsed), claimed: r.claimed };
+}
+
+export function startRace() {
+  getSave().race = { start: Date.now(), wins: 0, done: 0, seed: Math.floor(Math.random() * 1e9), claimed: false };
+  save();
+}
+
+/** Called when the player wins a level. */
+export function raceWin() {
+  const s = getSave();
+  const st = raceState();
+  if (!s.race || !st || st.over) return;
+  s.race.wins = Math.min(RACE_TARGET, s.race.wins + 1);
+  if (s.race.wins >= RACE_TARGET) s.race.done = Date.now();
+  save();
+}
+
+export function raceReward(rank: number): Reward | null {
+  if (rank === 1) return { coins: 600, hammer: 1, row: 1, packs: 1 };
+  if (rank === 2) return { coins: 300, packs: 1 };
+  if (rank === 3) return { coins: 150 };
+  return null;
+}
+
+export function claimRace(): Reward | null {
+  const s = getSave();
+  const st = raceState();
+  if (!s.race || !st || !st.over || s.race.claimed) return null;
+  s.race.claimed = true;
+  const r = raceReward(st.rank);
+  if (r) grant(r);
+  save();
+  return r;
+}
+
+export function raceBadge(): number {
+  const st = raceState();
+  if (!st) return 1; // invite to join
+  return st.over && !st.claimed ? 1 : 0;
+}
+
+// ------------------------------------------------------------------ statistics
+export function countStat(key: string, n = 1) {
+  const c = getSave().stats.counts;
+  c[key] = (c[key] ?? 0) + n;
 }

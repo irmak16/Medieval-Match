@@ -1,4 +1,4 @@
-import { Container, NineSliceSprite, Sprite, Text, TextStyleOptions, Graphics } from 'pixi.js';
+import { Container, NineSliceSprite, Sprite, Text, TextStyleOptions, Graphics, Texture } from 'pixi.js';
 import { tex } from './assets';
 import { tween, Ease } from './tween';
 import { sfx, unlockAudio } from './audio';
@@ -87,9 +87,9 @@ export class Button extends Container {
   }
 }
 
-export function iconButton(icon: string, size: number, onTap: () => void): Button {
+export function iconButton(icon: string | Texture, size: number, onTap: () => void): Button {
   const b = new Button('round', size, null, onTap);
-  const ic = new Sprite(tex(icon));
+  const ic = new Sprite(typeof icon === 'string' ? tex(icon) : icon);
   ic.anchor.set(0.5);
   ic.scale.set((size * 0.55) / ic.texture.width);
   ic.y = -size * 0.02;

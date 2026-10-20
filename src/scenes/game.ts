@@ -1,12 +1,12 @@
 import { Container, Graphics, NineSliceSprite, Point, Sprite, Text } from 'pixi.js';
 import { Board, Kind, BoosterKind } from '../game/board';
-import { trackQuest, addRoadPoints, streakBonus, addCupPoints, loseLife } from '../liveops';
+import { trackQuest, addRoadPoints, streakBonus, addCupPoints, loseLife, piggyAdd, raceWin, raceState, RACE_TARGET } from '../liveops';
 import { addPacks } from '../album';
 import { Pip, hasPip } from '../mascot';
 import { FX } from '../fx';
 import { getLevel, GoalType, LevelDef } from '../levels';
-import { tex, hasTex, texOr, iceTex } from '../assets';
-const gtex = (n: string) => (n === '__ice' ? iceTex(2) : tex(n));
+import { tex, hasTex, texOr, iceTex, cauldronTex, beltTex } from '../assets';
+const gtex = (n: string) => (n === '__ice' ? iceTex(2) : n === '__cauldron' ? cauldronTex(2) : n === '__belt' ? beltTex() : tex(n));
 import { label, woodPanel, Button, iconButton, overlay } from '../ui';
 import { tween, Ease, wait, clearTimers, after, killTweens, fadeUpAndDestroy } from '../tween';
 import { sfx, updateMusic, setMusicIntensity } from '../audio';
@@ -15,7 +15,7 @@ import type { App } from '../main';
 
 const GOAL_TEX: Record<GoalType, string> = {
   red: 'tile_red', blue: 'tile_blue', green: 'tile_green', yellow: 'tile_yellow', purple: 'tile_purple',
-  crate: 'ob_crate1', stone: 'ob_stone1', chain: 'ob_chain', vines: 'ob_vines', gold: 'ic_coin', ice: '__ice',
+  crate: 'ob_crate1', stone: 'ob_stone1', chain: 'ob_chain', vines: 'ob_vines', gold: 'ic_coin', ice: '__ice', cauldron: '__cauldron',
 };
 
 const BOOSTERS: { k: BoosterKind; tex: string; fallback: string; rot: number; name: string; price: number; hint: string }[] = [
@@ -61,6 +61,7 @@ export class GameScene extends Container {
     super();
     this.def = getLevel(levelNo);
     this.moves = this.def.moves;
+    Board.symbols = getSave().symbols;
     this.build();
   }
 
@@ -209,7 +210,7 @@ export class GameScene extends Container {
   }
 
   private countInGrid(type: GoalType): number {
-    const chars = type === 'crate' ? '123' : type === 'stone' ? '456' : type === 'vines' ? 'vg' : type === 'chain' ? 'c' : type === 'gold' ? 'T' : '';
+    const chars = type === 'cauldron' ? 'K' : type === 'crate' ? '1237890' : type === 'stone' ? '456' : type === 'vines' ? 'vg' : type === 'chain' ? 'c' : type === 'gold' ? 'T' : '';
     if (type === 'ice') {
       let k = 0;
       for (const row of this.def.grid) for (const ch of row) k += ch === 'i' || ch === 'I' ? 1 : 0;
@@ -388,6 +389,9 @@ export class GameScene extends Container {
       31: { key: 'tip_gold', title: 'Yeni: Kraliyet Hazinesi', icons: [hasTex('it_chest') ? 'it_chest' : 'ic_coin'], text: 'Hazineyi eşleşmelerle aşağı indir.\nTahtanın en altına ulaşınca toplanır!' },
       32: { key: 'tip_portal', title: 'Yeni: Büyülü Geçit', icons: ['p_ring'], text: 'Bir geçidin altına düşen taşlar\ndiğer geçitten çıkar.' },
       41: { key: 'tip_ice', title: 'Yeni: Buz', icons: ['__ice'], text: 'Buzun üstündeki taşı patlat,\nbuz kırılsın. Kalın buz iki vuruş ister.' },
+      61: { key: 'tip_cauldron', title: 'Yeni: Cadı Kazanı', icons: ['__cauldron'], text: 'Kazanın yanında 4 eşleşme yap.\nDolunca taşar ve çevresindeki\nher şeyi vurur!' },
+      64: { key: 'tip_ccrate', title: 'Yeni: Renkli Sandık', icons: ['tile_blue', 'ob_crate1'], text: 'Renkli sandığı sadece kendi\nrengindeki eşleşme kırar.\nGüçlendiriciler her rengi kırar.' },
+      66: { key: 'tip_belt', title: 'Yeni: Yürüyen Bant', icons: ['__belt'], text: 'Her hamleden sonra banttaki taşlar\nbir kare kayar. Kaymayı hesaba kat,\nyeni eşleşmeler kendiliğinden oluşur!' },
       33: { key: 'tip_grow', title: 'Yeni: Büyüyen Sarmaşık', icons: ['ob_vines'], text: 'Bir hamlede hiç sarmaşık kırmazsan\nsarmaşık yanındaki taşa yayılır!' },
     };
     const tip = tips[this.levelNo];
@@ -625,6 +629,8 @@ export class GameScene extends Container {
     const cs = this.board.cascade;
     if (cs !== this.lastCascade) {
       this.lastCascade = cs;
+      const st = getSave().stats;
+      if (cs > st.bestCombo && this.state === 'play') st.bestCombo = cs;
       if (cs >= 2) {
         this.comboTxt.text = `Kombo x${cs}`;
         killTweens(this.comboTxt);
@@ -695,6 +701,13 @@ export class GameScene extends Container {
     if (s.level <= this.levelNo) s.level = this.levelNo + 1;
     s.best = Math.max(s.best, this.levelNo);
     s.streak += 1;
+    s.stats.wins += 1;
+    s.stats.starsEarned += 1;
+    s.stats.bestStreak = Math.max(s.stats.bestStreak, s.streak);
+    const piggy = piggyAdd(diff, leftMoves);
+    const raceBefore = raceState();
+    raceWin();
+    const raced = !!raceBefore && !raceBefore.over;
     trackQuest('win');
     const pts = diff === 'superhard' ? 3 : diff === 'hard' ? 2 : 1;
     addRoadPoints(pts);
@@ -704,7 +717,7 @@ export class GameScene extends Container {
     if (gotPack) addPacks(1);
     save();
     this.uiFx.confetti(this.W / 2, -20, this.W, 120);
-    this.showWinPopup(reward, gotPack);
+    this.showWinPopup(reward, gotPack, piggy, raced ? getSave().race!.wins : -1);
   }
 
   private popup(title: string, h = 760): { root: Container; panel: Container; ph: number } {
@@ -731,7 +744,7 @@ export class GameScene extends Container {
     return { root, panel, ph };
   }
 
-  private showWinPopup(reward: number, gotPack = false) {
+  private showWinPopup(reward: number, gotPack = false, piggy = 0, race = -1) {
     const { panel, ph } = this.popup('Tebrikler!');
     this.peekPip('happy', panel, -ph * 0.36, ph * 0.08, 200);
     const star = new Sprite(tex('ui_star'));
@@ -754,9 +767,9 @@ export class GameScene extends Container {
     const coin = new Sprite(tex('ic_coin'));
     coin.anchor.set(0.5);
     coin.scale.set(0.62);
-    coin.position.set(-50, ph * 0.17);
+    coin.position.set(-50, ph * 0.155);
     const ct = label('+0', 44, { fill: 0xffe066 });
-    ct.position.set(30, ph * 0.17);
+    ct.position.set(30, ph * 0.155);
     panel.addChild(coin, ct);
     const roll = { v: 0 };
     tween(roll, { v: reward }, 0.9, Ease.outCubic, 0.5, () => {
@@ -767,9 +780,14 @@ export class GameScene extends Container {
       const l = this.toLocal(g);
       this.uiFx.sparkleBurst(l.x, l.y, 18, 0xffe070, 5);
     }, 'ui');
-    if (gotPack) {
-      const pk = label('+1 kart paketi!', 26, { fill: 0x2f7a1a, stroke: 0xfff2d0, strokeW: 4, shadow: false });
-      pk.y = ph * 0.245;
+    const extras: string[] = [];
+    if (gotPack) extras.push('+1 kart paketi!');
+    if (piggy > 0) extras.push(`Kumbara +${piggy}`);
+    if (race >= 0) extras.push(`Yarış ${race}/${RACE_TARGET}`);
+    if (extras.length) {
+      const pk = label(extras.join('  ·  '), 24, { fill: 0x2f7a1a, stroke: 0xfff2d0, strokeW: 4, shadow: false });
+      pk.y = ph * 0.222;
+      if (pk.width > 520) pk.scale.set(520 / pk.width);
       panel.addChild(pk);
     }
     after(0.6, () => sfx.coin());
@@ -780,9 +798,11 @@ export class GameScene extends Container {
 
   private onOutOfMoves() {
     sfx.lose();
-    const { root, panel, ph } = this.popup('Hamle Bitti!');
+    const leftTotal = this.goals.reduce((a, g) => a + Math.max(0, g.left), 0);
+    const close = leftTotal <= 3;
+    const { root, panel, ph } = this.popup(close ? 'Çok Yaklaştın!' : 'Hamle Bitti!');
     this.peekPip('sad', panel, -ph * 0.36, ph * 0.1, 170);
-    const t = label('Biraz daha hamle ister misin?', 30, { fill: 0x5a2e0e, stroke: 0xfff2d0, strokeW: 4, shadow: false });
+    const t = label(close ? `Sadece ${leftTotal} kaldı! +5 hamleyle bitir.` : 'Biraz daha hamle ister misin?', 30, { fill: 0x5a2e0e, stroke: 0xfff2d0, strokeW: 4, shadow: false });
     t.y = -ph * 0.25;
     panel.addChild(t);
     const left = this.goals.filter((g) => g.left > 0);
@@ -824,14 +844,46 @@ export class GameScene extends Container {
       more.enabled = false;
       more.alpha = 0.5;
     }
+    const quit = new Button('red', 260, 'Pes Et', () => this.confirmQuit(root), 34);
+    quit.y = ph * 0.32;
+    panel.addChild(more, quit);
+  }
+
+  /** Royal Match style "are you sure?" — shows what giving up costs. */
+  private confirmQuit(prev: Container) {
+    prev.visible = false;
+    const { root, panel, ph } = this.popup('Emin misin?');
+    const s = getSave();
+    const ink = { fill: 0x5a2e0e, stroke: 0xfff2d0, strokeW: 4, shadow: false } as const;
+    const heart = new Sprite(tex('ic_heart'));
+    heart.anchor.set(0.5);
+    heart.scale.set(0.7);
+    heart.y = -ph * 0.17;
+    const minus = label('-1', 44, { fill: 0xff7a6a });
+    minus.position.set(70, -ph * 0.17);
+    panel.addChild(heart, minus);
+    const lines = ['Pes edersen 1 can kaybedersin.'];
+    if (s.streak > 0) lines.push(`${s.streak} galibiyetlik serin de sıfırlanır!`);
+    const t = label(lines.join('\n'), 27, ink);
+    t.style.lineHeight = 38;
+    t.y = -ph * 0.02;
+    panel.addChild(t);
+    const back = new Button('green', 300, 'Vazgeç', () => {
+      root.destroy({ children: true });
+      prev.visible = true;
+    }, 34);
+    back.y = ph * 0.15;
     const quit = new Button('red', 260, 'Pes Et', () => {
-      getSave().streak = 0;
+      const s2 = getSave();
+      s2.streak = 0;
+      s2.stats.losses += 1;
+      s2.stats.fails[this.levelNo] = (s2.stats.fails[this.levelNo] ?? 0) + 1;
       loseLife();
       save();
       this.app.showMenu();
-    }, 34);
-    quit.y = ph * 0.32;
-    panel.addChild(more, quit);
+    }, 32);
+    quit.y = ph * 0.31;
+    panel.addChild(back, quit);
   }
 
   private openPause() {
@@ -863,12 +915,8 @@ export class GameScene extends Container {
     const resume = new Button('green', 280, 'Devam Et', close, 34);
     resume.y = ph * 0.13;
     const quit = new Button('red', 280, 'Ana Menü', () => {
-      if (this.moves < this.def.moves) {
-        getSave().streak = 0; // leaving a started level breaks the streak
-        loseLife();
-        save();
-      }
-      this.app.showMenu();
+      if (this.moves < this.def.moves) this.confirmQuit(root); // leaving a started level costs a life
+      else this.app.showMenu();
     }, 34);
     quit.y = ph * 0.305;
     panel.addChild(resume, quit);

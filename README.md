@@ -10,9 +10,12 @@ Ortaçağ temalı, Royal Match tarzı bir match-3 oyunu. TypeScript + PixiJS ile
 - **5'li sıra → Kristal küre**: bir rengin tamamını siler.
 - Güçlendiricileri birbiriyle değiştirerek kombo yap (ör. küre + küre tüm tahtayı temizler).
 - Engeller: tahta sandık, taş blok (1–3 can), sarmaşık ve zincir.
-- 60 elle tasarlanmış seviye + 100 hazır üretilmiş seviye (toplam 160), sonrasında sonsuz otomatik seviye.
+- 80 elle tasarlanmış seviye + 100 hazır üretilmiş seviye (toplam 180), sonrasında sonsuz otomatik seviye.
 - Buz zemini (1–2 vuruş), seviye haritası, kale, kart albümü, Kraliyet Kupası, Pip'i Kurtar mini oyunu, 5 can sistemi.
 - Yeni mekanikler: **Kraliyet Hazinesi** (en alta indir), **Büyülü Geçit** (portal), **Büyüyen Sarmaşık**.
+- 61-80: **Cadı Kazanı** (4 vuruşta dolar, taşınca çevresini vurur), **Renkli Sandık** (sadece kendi rengi kırar), **Yürüyen Bant** (her hamleden sonra satır kayar).
+- Hazine Kumbarası, Yıldız Sandığı (her 10 yıldızda), 24 saatlik Şövalye Yarışı, istatistik ekranı.
+- Renk körü modu (taşlarda şekiller), grafik kalitesi ayarı, pes etmeden önce onay, "çok yaklaştın" ekranı.
 - Oyun içi güçlendiriciler (hamle harcamaz): Çekiç, Okçu, Mancınık, Soytarı.
 - Kale restorasyonu: yıldızlarla 6 bölgeyi onar, her bölge ödül verir.
 - Günlük ödül, günlük görevler, haftalık Hazine Yolu, galibiyet serisi bonusu.
@@ -39,6 +42,7 @@ Hamle sayıları tahminle değil, oyunun kurallarını taklit eden bir simülat�
 ```bash
 python3 tools/sim.py 12          # her seviyeyi 12 kez oynatır, kazanma oranlarını gösterir
 python3 tools/tune_moves.py 24   # src/levels.ts içindeki hamle sayılarını yeniden ayarlar
+python3 tools/tune_range.py 30 61 80   # sadece bir aralığı ayarlar (güvenlik payıyla)
 python3 tools/variety.py         # seviyelerin mekanik / boyut / hedef çeşitliliği
 python3 tools/level_report.py    # seviye doğrulaması (GitHub Actions'ta da çalışır)
 ```

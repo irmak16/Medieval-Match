@@ -3,8 +3,8 @@ import sys
 sys.path.insert(0, 'tools')
 import sim
 ok = True
-CHARS = set('.x123456vcHVBFOgTiI')
-NEED = {'crate': '123', 'stone': '456', 'vines': 'vg', 'chain': 'c', 'ice': 'iI'}
+CHARS = set('.x1234567890vcHVBFOgTiIK')
+NEED = {'cauldron': 'K', 'crate': '1237890', 'stone': '456', 'vines': 'vg', 'chain': 'c', 'ice': 'iI'}
 levels = sim.parse_levels()
 for n, lv in enumerate(levels, 1):
     g = lv['grid']
