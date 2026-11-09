@@ -24,6 +24,7 @@ export interface SaveData {
   symbols: boolean; // colour-blind helper shapes on tiles
   homeHint: boolean; // the "add to home screen / backup code" hint was dismissed
   unlocks: string[]; // feature-unlock popups already shown
+  unlimitedUntil: number; // timestamp (ms) until which lives are unlimited, 0 = not active
   unlocksInit: boolean; // old saves have had their already-unlocked features marked as shown
 }
 
@@ -31,6 +32,8 @@ export interface Stats {
   wins: number; losses: number; starsEarned: number; bestStreak: number; bestCombo: number;
   counts: Record<string, number>; // tiles, powers, crates… cleared
   fails: Record<string, number>; // per level: times given up
+  /** per level (key = level number): [attempts, wins, give-ups, continues bought, moves left at last win, boosters used] */
+  lv: Record<string, number[]>;
 }
 
 const KEY = 'medieval-match-save-v1';
@@ -49,11 +52,12 @@ const DEFAULTS: SaveData = {
   piggy: 0,
   chest: 0,
   race: null,
-  stats: { wins: 0, losses: 0, starsEarned: 0, bestStreak: 0, bestCombo: 0, counts: {}, fails: {} },
+  stats: { wins: 0, losses: 0, starsEarned: 0, bestStreak: 0, bestCombo: 0, counts: {}, fails: {}, lv: {} },
   gfx: 'auto',
   symbols: false,
   homeHint: false,
   unlocks: [],
+  unlimitedUntil: 0,
   unlocksInit: false,
 };
 
@@ -81,6 +85,11 @@ function mergeDefaults(def: any, v: any): any {
 /** Turns whatever was stored (or imported) into a complete, valid save. */
 function normalize(parsed: unknown): SaveData {
   const d: SaveData = mergeDefaults(DEFAULTS, parsed);
+  const lv: Record<string, number[]> = {};
+  for (const [k, v] of Object.entries(d.stats.lv)) {
+    if (Array.isArray(v)) lv[k] = [0, 1, 2, 3, 4, 5].map((i) => (Number.isFinite(v[i]) ? Math.max(0, Math.floor(v[i])) : 0));
+  }
+  d.stats.lv = lv;
   if (!['auto', 'low', 'high'].includes(d.gfx)) d.gfx = 'auto';
   if (d.race && ![d.race.start, d.race.wins, d.race.done, d.race.seed].every((n) => Number.isFinite(n))) d.race = null;
   d.level = Math.max(1, Math.floor(d.level));
@@ -193,4 +202,24 @@ export function importCode(code: string): boolean {
   } catch {
     return false;
   }
+}
+
+// ---------------------------------------------------------------------- per-level play data
+export const LV = { ATTEMPTS: 0, WINS: 1, GIVEUPS: 2, CONTINUES: 3, LEFT: 4, BOOSTERS: 5 } as const;
+
+/** Adds `v` to (or with `set`, replaces) one counter of a level. Dev mode records nothing. */
+export function recordLevel(n: number, field: number, v = 1, set = false): void {
+  if (DEV.on) return;
+  const k = String(n);
+  const r = data.stats.lv[k] ?? (data.stats.lv[k] = [0, 0, 0, 0, 0, 0]);
+  r[field] = set ? v : r[field] + v;
+  save();
+}
+
+/** Compact text block for pasting to the developer: a header line, then one line per level with data. */
+export function telemetryText(): string {
+  const lines = ['MMD1 level,attempts,wins,giveups,continues,left,boosters'];
+  const keys = Object.keys(data.stats.lv).map(Number).sort((a, b) => a - b);
+  for (const n of keys) lines.push(`${n},${data.stats.lv[n].join(',')}`);
+  return lines.join('\n');
 }

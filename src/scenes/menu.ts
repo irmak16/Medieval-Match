@@ -6,7 +6,7 @@ import { tween, Ease, fadeUpAndDestroy } from '../tween';
 import { getSave, save, DEV } from '../storage';
 import { updateMusic } from '../audio';
 import type { App } from '../main';
-import { dailyAvailable, questsClaimable, roadClaimable, streakBonus, lives, nextLifeIn, MAX_LIVES, refillLives, REFILL_COST, cup, PIGGY_MIN, PIGGY_MAX, chestProgress, raceBadge } from '../liveops';
+import { dailyAvailable, questsClaimable, roadClaimable, streakBonus, lives, nextLifeIn, canPlay, unlimitedLeft, unlimitedText, MAX_LIVES, refillLives, REFILL_COST, cup, PIGGY_MIN, PIGGY_MAX, chestProgress, raceBadge } from '../liveops';
 import { dailyPanel, questsPanel, roadPanel, cupPanel, popup, piggyPanel, chestPanel, racePanel, statsPanel } from './panels';
 import { rescueAvailable } from './rescue';
 import { Pip, hasPip } from '../mascot';
@@ -345,7 +345,7 @@ export class MenuScene extends Container {
   }
 
   private play() {
-    if (lives() <= 0 && !DEV.on) {
+    if (!canPlay() && !DEV.on) {
       this.livesPanel();
       return;
     }
@@ -362,7 +362,8 @@ export class MenuScene extends Container {
 
   private livesPanel() {
     const { panel, ph, close } = popup(this, this.W, this.H, 'Canlar');
-    const n = lives();
+    const unl = unlimitedLeft() > 0;
+    const n = unl ? MAX_LIVES : lives();
     for (let i = 0; i < MAX_LIVES; i++) {
       const h = new Sprite(tex('ic_heart'));
       h.anchor.set(0.5);
@@ -372,10 +373,10 @@ export class MenuScene extends Container {
       panel.addChild(h);
     }
     const ink = { fill: 0x5a2e0e, stroke: 0xfff2d0, strokeW: 4, shadow: false } as const;
-    const t = label(n >= MAX_LIVES ? 'Canların dolu!' : `Sonraki can: ${nextLifeIn()}\nHer 20 dakikada 1 can dolar.`, 28, ink);
+    const t = label(unl ? `Sınırsız can! ∞\nKalan süre: ${unlimitedText()}` : n >= MAX_LIVES ? 'Canların dolu!' : `Sonraki can: ${nextLifeIn()}\nHer 10 dakikada 1 can dolar.`, 28, ink);
     t.y = -ph * 0.04;
     panel.addChild(t);
-    if (n < MAX_LIVES) {
+    if (n < MAX_LIVES && !unl) {
       const b = new Button('green', 330, `Doldur (${REFILL_COST} altın)`, () => {
         if (refillLives()) {
           sfx.coin();
@@ -417,8 +418,13 @@ export class MenuScene extends Container {
     if (sec !== this.lastSec) {
       this.lastSec = sec;
       const n = lives();
-      this.heartTxt.text = String(n);
-      this.heartTimer.text = n >= MAX_LIVES ? 'Dolu' : nextLifeIn();
+      if (unlimitedLeft() > 0) {
+        this.heartTxt.text = '∞';
+        this.heartTimer.text = unlimitedText();
+      } else {
+        this.heartTxt.text = String(n);
+        this.heartTimer.text = n >= MAX_LIVES ? 'Dolu' : nextLifeIn();
+      }
     }
     // falcon glides around in a lazy figure-eight
     const f = this.falcon;

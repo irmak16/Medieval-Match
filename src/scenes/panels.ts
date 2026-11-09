@@ -7,7 +7,7 @@ import { sfx } from '../audio';
 import {
   DAILY, dailyAvailable, dailyIndex, claimDaily, quests, questText, ROAD, road, grant, rewardText, Reward,
 } from '../liveops';
-import { getSave, save } from '../storage';
+import { getSave, save, telemetryText } from '../storage';
 import { cup, cupBoard, cupReward, cupTimeLeft } from '../liveops';
 import {
   PIGGY_MIN, PIGGY_MAX, piggyBreak, chestProgress, openChest, CHEST_EVERY, raceState, startRace, raceReward, claimRace, RACE_TARGET,
@@ -80,6 +80,7 @@ function dailyLines(r: Reward): string[] {
   if (r.shuffle) l.push(`${r.shuffle} soytarı`);
   if (r.packs) l.push(`${r.packs} kart paketi`);
   if (r.coins) l.push(l.length ? `+${r.coins} altın` : String(r.coins));
+  if (r.unlimited) l.push(`${r.unlimited} dk ∞ can`);
   return l;
 }
 
@@ -91,10 +92,10 @@ export function dailyPanel(parent: Container, W: number, H: number, onChange: ()
     const col = i % 4, row = Math.floor(i / 4);
     const cell = new Container();
     const cx = row === 0 ? (col - 1.5) * 128 : (col - 1) * 128;
-    cell.position.set(cx, -ph * 0.2 + row * 190);
+    cell.position.set(cx, -ph * 0.2 + row * 200);
     const isToday = i === today && avail;
     const done = i < today || (!avail && i === today - 1) || (!avail && i < today);
-    const bg = new Graphics().roundRect(-60, -70, 120, 172, 18).fill({ color: isToday ? 0x6a8a2a : 0x3b2210, alpha: 0.9 }).stroke({ width: isToday ? 5 : 3, color: isToday ? 0xffe066 : 0xc89a3c });
+    const bg = new Graphics().roundRect(-60, -70, 120, 186, 18).fill({ color: isToday ? 0x6a8a2a : 0x3b2210, alpha: 0.9 }).stroke({ width: isToday ? 5 : 3, color: isToday ? 0xffe066 : 0xc89a3c });
     const day = label(`${i + 1}. Gün`, 22);
     day.y = -50;
     const ic = safeIcon(rewardIcon(r), 58);
@@ -104,7 +105,7 @@ export function dailyPanel(parent: Container, W: number, H: number, onChange: ()
     lines.forEach((ln, k) => {
       const txt = label(ln, lines.length === 1 ? 22 : 19);
       if (txt.width > 112) txt.scale.set(112 / txt.width); // always inside its own cell
-      txt.y = 62 + (k - (lines.length - 1) / 2) * 23;
+      txt.y = 62 + (lines.length > 3 ? 8 : 0) + (k - (lines.length - 1) / 2) * 22;
       cell.addChild(txt);
     });
     if (done) {
@@ -360,7 +361,7 @@ export function chestPanel(parent: Container, W: number, H: number, onChange: ()
   t.y = ph * 0.0;
   const bar = progressBar(pw * 0.62, 30, p.have / p.need, 0xffd23a);
   bar.y = ph * 0.075;
-  const info = label(`Her ${CHEST_EVERY} yıldızda bir sandık açılır:\naltın, güçlendirici ve bazen kart paketi.`, 23, INK);
+  const info = label(`Her ${CHEST_EVERY} yıldızda bir sandık açılır:\naltın, güçlendirici, 30 dk sınırsız can\nve bazen kart paketi.`, 23, INK);
   info.style.lineHeight = 32;
   info.y = ph * 0.17;
   panel.addChild(t, bar, info);
@@ -413,8 +414,9 @@ export function racePanel(parent: Container, W: number, H: number, onChange: () 
     const t = label(`${RACE_TARGET} seviyeyi ilk bitiren kazanır!\n4 şövalyeye karşı 24 saat.`, 28, INK);
     t.style.lineHeight = 38;
     t.y = ph * 0.0;
-    const rw = label(`1.: ${rewardText(raceReward(1)!)}\n2.: ${rewardText(raceReward(2)!)} · 3.: ${rewardText(raceReward(3)!)}`, 20, { fill: 0x2f7a1a, stroke: 0xfff2d0, strokeW: 4, shadow: false });
+    const rw = label(`1.: ${rewardText(raceReward(1)!).replace(' + 1 kart paketi', '\n+ 1 kart paketi')}\n2.: ${rewardText(raceReward(2)!)} · 3.: ${rewardText(raceReward(3)!)}`, 20, { fill: 0x2f7a1a, stroke: 0xfff2d0, strokeW: 4, shadow: false });
     rw.style.lineHeight = 28;
+    if (rw.width > pw * 0.82) rw.scale.set((pw * 0.82) / rw.width);
     rw.y = ph * 0.13;
     const b = new Button('green', 300, 'Yarışa Katıl', () => {
       startRace();
@@ -454,14 +456,19 @@ export function racePanel(parent: Container, W: number, H: number, onChange: () 
   });
   if (st.over) {
     const rw = raceReward(st.rank);
-    const t = label(rw ? `${st.rank}. oldun! Ödül: ${rewardText(rw)}` : `${st.rank}. oldun. Bir dahakine!`, 21, INK);
-    t.y = ph * 0.22;
+    const rt = rw ? rewardText(rw).split(' + ') : [];
+    const half = Math.ceil(rt.length / 2);
+    const t = label(rw ? `${st.rank}. oldun! ${rt.slice(0, half).join(' + ')}\n${rt.slice(half).join(' + ')}`.trim() : `${st.rank}. oldun. Bir dahakine!`, 21, INK);
+    t.style.lineHeight = 26;
+    if (t.width > pw * 0.8) t.scale.set((pw * 0.8) / t.width);
+    t.y = ph * 0.222;
     const b = new Button('green', 280, rw ? 'Topla' : 'Tamam', () => {
       claimRace();
       if (rw) { sfx.coin(); sfx.star(); }
       close();
     }, 34);
-    b.y = ph * 0.32;
+    b.y = ph * 0.355;
+    b.setBaseScale(0.85);
     panel.addChild(t, b);
   } else {
     const t = label('Her kazandığın seviye seni 1 adım ilerletir.', 21, INK);
@@ -507,4 +514,17 @@ export function statsPanel(parent: Container, W: number, H: number) {
   list.y = hy + 34;
   if (list.width > pw * 0.8) list.scale.set((pw * 0.8) / list.width);
   panel.addChild(list);
+  // copy the per-level play data for the developer
+  const cp = new Button('green', 400, 'Zorluk Verisini Kopyala', () => {
+    const text = telemetryText();
+    try {
+      navigator.clipboard?.writeText(text);
+    } catch {
+      /* ignore */
+    }
+    window.prompt('Zorluk verisi (kopyalandı). Geliştiriciye yapıştır:', text);
+  }, 27);
+  cp.setBaseScale(0.75);
+  cp.y = ph * 0.315;
+  panel.addChild(cp);
 }

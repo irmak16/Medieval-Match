@@ -1,7 +1,7 @@
 // Live-ops style systems that work offline: daily reward, daily quests, weekly treasure road, win streak.
 import { getSave, save } from './storage';
 
-export type Reward = { coins?: number; hammer?: number; row?: number; col?: number; shuffle?: number; packs?: number };
+export type Reward = { coins?: number; hammer?: number; row?: number; col?: number; shuffle?: number; packs?: number; unlimited?: number /* minutes of unlimited lives */ };
 
 function pad(n: number) {
   return n < 10 ? '0' + n : String(n);
@@ -27,6 +27,7 @@ export function grant(r: Reward) {
   s.inv.col += r.col ?? 0;
   s.inv.shuffle += r.shuffle ?? 0;
   s.album.packs += r.packs ?? 0;
+  if (r.unlimited) s.unlimitedUntil = Math.max(Date.now(), s.unlimitedUntil) + r.unlimited * 60000; // extends an active period
   save();
 }
 
@@ -38,6 +39,7 @@ export function rewardText(r: Reward): string {
   if (r.col) parts.push(`${r.col} mancınık`);
   if (r.shuffle) parts.push(`${r.shuffle} soytarı`);
   if (r.packs) parts.push(`${r.packs} kart paketi`);
+  if (r.unlimited) parts.push(`${r.unlimited} dk sınırsız can`);
   return parts.join(' + ');
 }
 
@@ -45,11 +47,11 @@ export function rewardText(r: Reward): string {
 export const DAILY: Reward[] = [
   { coins: 50 },
   { hammer: 1 },
-  { coins: 100 },
+  { coins: 100, unlimited: 30 },
   { row: 1, col: 1 },
   { coins: 150 },
   { shuffle: 1, coins: 50 },
-  { coins: 250, hammer: 2, packs: 1 },
+  { coins: 250, hammer: 2, packs: 1, unlimited: 60 },
 ];
 
 export function dailyAvailable(): boolean {
@@ -249,10 +251,10 @@ export function cupTimeLeft(): string {
   return hours >= 24 ? `${Math.floor(hours / 24)} gün ${hours % 24} sa` : `${hours} sa`;
 }
 
-// ------------------------------------------------------------------ lives (5 hearts, one refills every 20 minutes)
+// ------------------------------------------------------------------ lives (5 hearts, one refills every 10 minutes)
 export const MAX_LIVES = 5;
-const REGEN_MS = 20 * 60 * 1000;
-export const REFILL_COST = 250;
+const REGEN_MS = 10 * 60 * 1000;
+export const REFILL_COST = 200;
 
 export function lives(): number {
   const s = getSave();
@@ -278,7 +280,24 @@ export function nextLifeIn(): string {
   return `${m}:${sec < 10 ? '0' : ''}${sec}`;
 }
 
+/** Unlimited lives (granted by rewards): milliseconds left, 0 when not active. */
+export function unlimitedLeft(): number {
+  return Math.max(0, getSave().unlimitedUntil - Date.now());
+}
+
+/** "42 dk" / "1 sa 5 dk" for the remaining unlimited time. */
+export function unlimitedText(): string {
+  const m = Math.max(1, Math.ceil(unlimitedLeft() / 60000));
+  return m < 60 ? `${m} dk` : `${Math.floor(m / 60)} sa ${m % 60} dk`;
+}
+
+/** Can the player start a level? Never blocked while lives are unlimited. */
+export function canPlay(): boolean {
+  return unlimitedLeft() > 0 || lives() > 0;
+}
+
 export function loseLife() {
+  if (unlimitedLeft() > 0) return; // unlimited lives: losing or quitting is free
   const l = getSave().lives;
   lives();
   if (l.n >= MAX_LIVES) l.t = Date.now();
@@ -332,6 +351,7 @@ export function openChest(): Reward | null {
   const boosters: Reward[] = [{ hammer: 1 }, { row: 1 }, { col: 1 }, { shuffle: 1 }];
   const r: Reward = { coins: 150 + (k % 3) * 50, ...boosters[k % 4] };
   if (k % 2 === 0) r.packs = 1;
+  r.unlimited = 30;
   grant(r);
   return r;
 }
@@ -385,7 +405,7 @@ export function raceWin() {
 }
 
 export function raceReward(rank: number): Reward | null {
-  if (rank === 1) return { coins: 600, hammer: 1, row: 1, packs: 1 };
+  if (rank === 1) return { coins: 600, hammer: 1, row: 1, packs: 1, unlimited: 120 };
   if (rank === 2) return { coins: 300, packs: 1 };
   if (rank === 3) return { coins: 150 };
   return null;

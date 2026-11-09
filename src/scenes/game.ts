@@ -1,6 +1,6 @@
 import { Container, Graphics, NineSliceSprite, Point, Sprite, Text } from 'pixi.js';
 import { Board, Kind, BoosterKind, Tile } from '../game/board';
-import { trackQuest, addRoadPoints, streakBonus, addCupPoints, loseLife, piggyAdd, raceWin, raceState, RACE_TARGET } from '../liveops';
+import { trackQuest, addRoadPoints, streakBonus, addCupPoints, loseLife, unlimitedLeft, piggyAdd, raceWin, raceState, RACE_TARGET } from '../liveops';
 import { addPacks } from '../album';
 import { Pip, hasPip } from '../mascot';
 import { FX } from '../fx';
@@ -10,10 +10,11 @@ const gtex = (n: string) => (n === '__ice' ? iceTex(2) : n === '__cauldron' ? ca
 import { label, woodPanel, Button, iconButton, overlay } from '../ui';
 import { tween, Ease, wait, clearTimers, after, killTweens, fadeUpAndDestroy } from '../tween';
 import { sfx, updateMusic, setMusicIntensity } from '../audio';
-import { getSave, save, DEV, firstTime } from '../storage';
+import { getSave, save, DEV, firstTime, recordLevel, LV } from '../storage';
 import { unlocked } from '../unlocks';
 import type { App } from '../main';
 
+const CONTINUE_COSTS = [150, 300, 500]; // "+5 Hamle" price for the 1st, 2nd and later continues of one attempt
 const SHOP_FROM = 4; // pre-level booster shop appears from this level on
 
 const GOAL_TEX: Record<GoalType, string> = {
@@ -63,6 +64,8 @@ export class GameScene extends Container {
   private uiFxAdd = new Container();
   private pips: Pip[] = [];
   private scaredShown = false;
+  private attemptCounted = false; // the first move of this attempt has been made
+  private continues = 0; // +5 move purchases in this attempt (the price escalates)
   private guide: GuideUI | null = null;
 
   constructor(private app: App, public levelNo: number, public W: number, public H: number) {
@@ -383,6 +386,7 @@ export class GameScene extends Container {
       }
       const play = new Button('green', 280, 'Oyna', () => {
         const kinds = [...chosen].map((i) => opts[i].kind);
+        if (kinds.length) recordLevel(this.levelNo, LV.BOOSTERS, kinds.length);
         getSave().coins -= spent();
         save();
         root.destroy({ children: true });
@@ -625,6 +629,10 @@ export class GameScene extends Container {
   }
 
   private useMove() {
+    if (!this.attemptCounted && this.state === 'play') {
+      this.attemptCounted = true;
+      recordLevel(this.levelNo, LV.ATTEMPTS);
+    }
     this.moves = Math.max(0, this.moves - 1);
     this.movesTxt.text = String(this.moves);
     this.movesTxt.scale.set(1.3);
@@ -705,6 +713,7 @@ export class GameScene extends Container {
     s.inv[k] = Math.max(0, s.inv[k] - 1);
     save();
     trackQuest('booster');
+    recordLevel(this.levelNo, LV.BOOSTERS);
     this.showBoosterHint(null);
     this.refreshBoosters();
   }
@@ -831,7 +840,7 @@ export class GameScene extends Container {
     await wait(0.3, 'ui');
     sfx.win();
     // "Kral Bonusu": remaining moves become arrows
-    const banner = label(this.moves > 0 ? `Kraliyet Bonusu!\n${this.moves} hamle = +${this.moves * 5} altın` : 'Kraliyet Bonusu!', this.moves > 0 ? 52 : 64, { fill: 0xffe066, stroke: 0x7a2e00, strokeW: 10 });
+    const banner = label(this.moves > 0 ? `Kraliyet Bonusu!\n${this.moves} hamle = +${this.moves * 3} altın` : 'Kraliyet Bonusu!', this.moves > 0 ? 52 : 64, { fill: 0xffe066, stroke: 0x7a2e00, strokeW: 10 });
     banner.position.set(this.W / 2, this.board.y + (this.board.H * this.board.S) / 2);
     banner.scale.set(0);
     this.flyLayer.addChild(banner);
@@ -849,8 +858,10 @@ export class GameScene extends Container {
     await wait(0.3, 'ui');
     const s = getSave();
     const diff = this.def.diff ?? 'normal';
-    const bonusCoins = leftMoves * 5; // every unused move is worth coins
-    const reward = (30 + Math.min(this.levelNo, 50) * 2) * (diff === 'superhard' ? 3 : diff === 'hard' ? 2 : 1) + bonusCoins;
+    const bonusCoins = leftMoves * 3; // every unused move is worth coins
+    const reward = (20 + Math.min(this.levelNo, 40)) * (diff === 'superhard' ? 3 : diff === 'hard' ? 2 : 1) + bonusCoins;
+    recordLevel(this.levelNo, LV.WINS);
+    recordLevel(this.levelNo, LV.LEFT, leftMoves, true);
     s.stars += 1;
     s.coins += reward;
     if (s.level <= this.levelNo) s.level = this.levelNo + 1;
@@ -971,7 +982,7 @@ export class GameScene extends Container {
       c.position.set(ic.x + 30, ic.y + 34);
       panel.addChild(ic, c);
     });
-    const cost = 150;
+    const cost = CONTINUE_COSTS[Math.min(this.continues, CONTINUE_COSTS.length - 1)];
     const s = getSave();
     const coinRow = new Container();
     const coinIc = new Sprite(tex('ic_coin'));
@@ -987,6 +998,8 @@ export class GameScene extends Container {
       if (getSave().coins < cost) return;
       getSave().coins -= cost;
       save();
+      this.continues++;
+      recordLevel(this.levelNo, LV.CONTINUES);
       sfx.coin();
       root.destroy({ children: true });
       this.moves += 5;
@@ -1011,14 +1024,18 @@ export class GameScene extends Container {
     const { root, panel, ph } = this.popup('Emin misin?');
     const s = getSave();
     const ink = { fill: 0x5a2e0e, stroke: 0xfff2d0, strokeW: 4, shadow: false } as const;
+    const free = unlimitedLeft() > 0; // unlimited lives: giving up costs no life
     const heart = new Sprite(tex('ic_heart'));
     heart.anchor.set(0.5);
     heart.scale.set(0.7);
     heart.y = -ph * 0.17;
-    const minus = label('-1', 44, { fill: 0xff7a6a });
-    minus.position.set(70, -ph * 0.17);
-    panel.addChild(heart, minus);
-    const lines = ['Pes edersen 1 can kaybedersin.'];
+    panel.addChild(heart);
+    if (!free) {
+      const minus = label('-1', 44, { fill: 0xff7a6a });
+      minus.position.set(70, -ph * 0.17);
+      panel.addChild(minus);
+    }
+    const lines = [free ? 'Sınırsız canın var,\ncan kaybetmezsin.' : 'Pes edersen 1 can kaybedersin.'];
     if (s.streak > 0) lines.push(`${s.streak} galibiyetlik serin de sıfırlanır!`);
     const t = label(lines.join('\n'), 27, ink);
     t.style.lineHeight = 38;
@@ -1034,6 +1051,7 @@ export class GameScene extends Container {
       s2.streak = 0;
       s2.stats.losses += 1;
       s2.stats.fails[this.levelNo] = (s2.stats.fails[this.levelNo] ?? 0) + 1;
+      recordLevel(this.levelNo, LV.GIVEUPS);
       loseLife();
       save();
       this.app.showMenu();
@@ -1071,7 +1089,7 @@ export class GameScene extends Container {
     const resume = new Button('green', 280, 'Devam Et', close, 34);
     resume.y = ph * 0.13;
     const quit = new Button('red', 280, 'Ana Menü', () => {
-      if (this.moves < this.def.moves) this.confirmQuit(root); // leaving a started level costs a life
+      if (this.moves < this.def.moves) this.confirmQuit(root); // leaving a started level costs a life (unless lives are unlimited)
       else this.app.showMenu();
     }, 34);
     quit.y = ph * 0.305;
