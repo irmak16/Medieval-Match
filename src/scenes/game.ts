@@ -315,9 +315,9 @@ export class GameScene extends Container {
       if (shopTip) {
         const tp = label('Yeni! Oyuna güçlendiriciyle başlayabilirsin.', 22, { fill: 0x2f7a1a, stroke: 0xfff2d0, strokeW: 4, shadow: false });
         if (tp.width > 500) tp.scale.set(500 / tp.width);
-        tp.y = y + ph * 0.043;
+        tp.y = y + ph * 0.052;
         panel.addChild(tp);
-        y += ph * 0.022;
+        y += ph * 0.03;
       }
       y += ph * 0.11;
       const s = getSave();
@@ -377,7 +377,8 @@ export class GameScene extends Container {
       const sb = streakBonus();
       if (sb.length) {
         const st = label(`Seri bonusu (${getSave().streak} galibiyet): +${sb.length} hediye güçlendirici!`, 22, { fill: 0x2f7a1a, stroke: 0xfff2d0, strokeW: 4, shadow: false });
-        st.y = shop ? y + ph * 0.115 : y - ph * 0.06;
+        if (st.width > 500) st.scale.set(500 / st.width);
+        st.y = shop ? y + ph * 0.122 : y - ph * 0.06;
         panel.addChild(st);
       }
       const play = new Button('green', 280, 'Oyna', () => {
@@ -387,7 +388,8 @@ export class GameScene extends Container {
         root.destroy({ children: true });
         resolve(kinds);
       }, 44);
-      play.y = shop ? ph * 0.355 : ph * 0.25;
+      play.y = shop ? ph * (sb.length ? 0.375 : 0.355) : ph * 0.25;
+      if (shop && sb.length) play.setBaseScale(0.85);
       panel.addChild(play);
       const pw = (panel.children[0] as Sprite).width;
       const close = new Button('red', 80, 'X', () => this.app.showMenu(), 34);
@@ -420,7 +422,9 @@ export class GameScene extends Container {
       if (!(await this.untilStable())) return;
       await wait(0.35, 'ui');
       if (!(await this.untilStable())) return;
-      const m = this.board.findMove();
+      // teach with a move that collects the level goal when there is one
+      const want = ['red', 'blue', 'green', 'yellow', 'purple'].indexOf(this.goals.find((g) => g.left > 0)?.type ?? '');
+      const m = this.board.findMove(want >= 0 ? want : undefined);
       if (!m || !this.alive()) return;
       const before = this.moves;
       if (!(await this.guideMove(m[0], m[1], st.text, st.hud))) return;

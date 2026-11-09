@@ -1585,7 +1585,8 @@ export class Board extends Container {
   }
 
   /** Returns a pair of tiles that makes a valid move, or null. */
-  findMove(): [Tile, Tile] | null {
+  findMove(prefer?: number): [Tile, Tile] | null {
+    let fallback: [Tile, Tile] | null = null;
     const colorGrid: (number | null)[][] = [];
     for (let r = 0; r < this.H; r++) {
       colorGrid.push([]);
@@ -1605,13 +1606,16 @@ export class Board extends Container {
           const va = colorGrid[r][c], vb = colorGrid[r + dr][c + dc];
           colorGrid[r][c] = vb;
           colorGrid[r + dr][c + dc] = va;
-          const ok = this.wouldMatch(colorGrid, r, c) || this.wouldMatch(colorGrid, r + dr, c + dc);
+          const m1 = this.wouldMatch(colorGrid, r, c), m2 = this.wouldMatch(colorGrid, r + dr, c + dc);
           colorGrid[r][c] = va;
           colorGrid[r + dr][c + dc] = vb;
-          if (ok) return [a, b];
+          if (!m1 && !m2) continue;
+          // (after the swap, cell (r,c) holds b's colour and the other cell holds a's)
+          if (prefer === undefined || (m1 && vb === prefer) || (m2 && va === prefer)) return [a, b];
+          fallback ??= [a, b];
         }
       }
-    return null;
+    return fallback;
   }
 
   hasMoves(): boolean {

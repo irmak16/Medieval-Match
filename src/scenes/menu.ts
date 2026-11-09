@@ -310,7 +310,7 @@ export class MenuScene extends Container {
       node.on('pointertap', () => {
         if (locked) {
           sfx.invalid();
-          this.toast(lockText(tb.feat!), barTop - 40);
+          this.toast(lockText(tb.feat!), this.H * 0.47);
         } else if (!home) {
           sfx.click();
           tb.tap();
