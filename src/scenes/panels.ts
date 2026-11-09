@@ -71,6 +71,18 @@ function progressBar(w: number, h: number, k: number, color = 0x5fd04a): Contain
 }
 
 // ------------------------------------------------------------------ daily reward
+/** Short caption lines for a daily reward cell (one item per line so each fits the cell). */
+function dailyLines(r: Reward): string[] {
+  const l: string[] = [];
+  if (r.hammer) l.push(`${r.hammer} çekiç`);
+  if (r.row) l.push(`${r.row} okçu`);
+  if (r.col) l.push(`${r.col} mancınık`);
+  if (r.shuffle) l.push(`${r.shuffle} soytarı`);
+  if (r.packs) l.push(`${r.packs} kart paketi`);
+  if (r.coins) l.push(l.length ? `+${r.coins} altın` : String(r.coins));
+  return l;
+}
+
 export function dailyPanel(parent: Container, W: number, H: number, onChange: () => void) {
   const { panel, ph, close } = popup(parent, W, H, 'Günlük Ödül', onChange);
   const today = dailyIndex();
@@ -79,18 +91,22 @@ export function dailyPanel(parent: Container, W: number, H: number, onChange: ()
     const col = i % 4, row = Math.floor(i / 4);
     const cell = new Container();
     const cx = row === 0 ? (col - 1.5) * 128 : (col - 1) * 128;
-    cell.position.set(cx, -ph * 0.2 + row * 170);
+    cell.position.set(cx, -ph * 0.2 + row * 190);
     const isToday = i === today && avail;
     const done = i < today || (!avail && i === today - 1) || (!avail && i < today);
-    const bg = new Graphics().roundRect(-56, -70, 112, 150, 18).fill({ color: isToday ? 0x6a8a2a : 0x3b2210, alpha: 0.9 }).stroke({ width: isToday ? 5 : 3, color: isToday ? 0xffe066 : 0xc89a3c });
+    const bg = new Graphics().roundRect(-60, -70, 120, 172, 18).fill({ color: isToday ? 0x6a8a2a : 0x3b2210, alpha: 0.9 }).stroke({ width: isToday ? 5 : 3, color: isToday ? 0xffe066 : 0xc89a3c });
     const day = label(`${i + 1}. Gün`, 22);
     day.y = -50;
-    const ic = safeIcon(rewardIcon(r), 62);
-    ic.y = 4;
-    const items = rewardText({ ...r, coins: 0 });
-    const txt = label(items ? (r.coins ? `${items} +${r.coins}` : items) : String(r.coins), items && r.coins ? 15 : 18);
-    txt.y = 56;
-    cell.addChild(bg, day, ic, txt);
+    const ic = safeIcon(rewardIcon(r), 58);
+    ic.y = -2;
+    cell.addChild(bg, day, ic);
+    const lines = dailyLines(r);
+    lines.forEach((ln, k) => {
+      const txt = label(ln, lines.length === 1 ? 22 : 19);
+      if (txt.width > 112) txt.scale.set(112 / txt.width); // always inside its own cell
+      txt.y = 62 + (k - (lines.length - 1) / 2) * 23;
+      cell.addChild(txt);
+    });
     if (done) {
       const tick = new Graphics().circle(30, -42, 16).fill({ color: 0x2f9b2a }).stroke({ width: 3, color: 0xffffff });
       cell.addChild(tick);

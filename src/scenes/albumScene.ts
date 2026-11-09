@@ -100,7 +100,7 @@ export class AlbumScene extends Container {
     });
     const set: SetDef = SETS[this.setIdx];
     // grid
-    const cw = Math.min(190, (W - 100) / 3, ((H - 230 - 230) / 3 - 16) / 1.36);
+    const cw = Math.min(190, (W - 100) / 3, ((H - 225 - 256) / 3 - 16) / 1.36);
     const ch = cw * 1.36;
     const top = 225;
     set.cards.forEach((c, i) => {
@@ -120,15 +120,17 @@ export class AlbumScene extends Container {
       getSave().album.sets.includes(set.id) ? 'Set tamamlandı!' : `Set ödülü: ${rewardText(set.reward)}`,
       22, { fill: 0xffe39a },
     );
-    rw.position.set(W / 2, gridBottom + 14);
+    rw.position.set(W / 2, gridBottom + 26);
     this.body.addChild(rw);
     // open pack button
     const packs = getSave().album.packs;
     this.packBtn = new Button(packs > 0 ? 'green' : 'red', 360, packs > 0 ? `Paket Aç (${packs})` : 'Paket yok', () => this.open(), 34);
-    this.packBtn.position.set(W / 2, Math.min(H - 90, gridBottom + 100));
+    this.packBtn.setBaseScale(0.75);
+    this.packBtn.position.set(W / 2, gridBottom + 131);
     this.body.addChild(this.packBtn);
     const hint = label('Paketler: seviye kazan, kale bölgesi bitir, Pip\'i kurtar', 18);
-    hint.position.set(W / 2, Math.min(H - 90, gridBottom + 100) + 62);
+    hint.position.set(W / 2, gridBottom + 229);
+    if (hint.width > W - 40) hint.scale.set((W - 40) / hint.width);
     hint.alpha = 0.85;
     this.body.addChild(hint);
     void this.packTxt;
