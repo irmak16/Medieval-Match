@@ -101,6 +101,10 @@ export class Board extends Container {
   /** colour-blind mode: draw a small shape on every tile */
   static symbols = false;
   pendingBooster: BoosterKind | null = null;
+  /** Tutorial: while set, only a swap between these two cells is accepted and everything else is ignored. */
+  guide: { r1: number; c1: number; r2: number; c2: number } | null = null;
+  /** Called the moment the guided swap is accepted. */
+  onGuideSwap: (() => void) | null = null;
   onBoosterUsed: ((k: BoosterKind) => void) | null = null;
 
   constructor(public def: LevelDef, size: number, public hooks: BoardHooks) {
@@ -388,6 +392,7 @@ export class Board extends Container {
       this.onBoosterUsed?.(k);
       return;
     }
+    if (this.guide && !this.guideCell(p.r, p.c)) return;
     const t = this.cell(p.r, p.c)?.tile;
     this.drag = { ...p, moved: false };
     this.clearHint();
@@ -414,7 +419,7 @@ export class Board extends Container {
     this.drag = null;
     const t = this.cell(d.r, d.c)?.tile;
     if (t) tween(t.view.scale, { x: 1, y: 1 }, 0.12);
-    if (!d.moved && this.inputEnabled && t && t.isPower && t.state === 'idle' && !this.grid[d.r][d.c].chain) {
+    if (!d.moved && this.inputEnabled && !this.guide && t && t.isPower && t.state === 'idle' && !this.grid[d.r][d.c].chain) {
       if (!this.hooks.canMove()) return;
       this.spendMove();
       this.cascade = 0;
@@ -571,13 +576,23 @@ export class Board extends Container {
     return !!t && t.state === 'idle' && !this.grid[t.r][t.c].chain;
   }
 
+  private guideCell(r: number, c: number): boolean {
+    const g = this.guide;
+    return !!g && ((g.r1 === r && g.c1 === c) || (g.r2 === r && g.c2 === c));
+  }
+
   private trySwap(r1: number, c1: number, r2: number, c2: number) {
+    if (this.guide && !(this.guideCell(r1, c1) && this.guideCell(r2, c2))) return; // tutorial: wrong swap, ignore
     const a = this.cell(r1, c1)?.tile, b = this.cell(r2, c2)?.tile;
     if (!this.swappable(a) || !this.swappable(b)) {
       if (this.swappable(a) && this.cell(r2, c2)) this.nudge(a, r2 - r1, c2 - c1);
       return;
     }
     if (!this.hooks.canMove()) return;
+    if (this.guide) {
+      this.guide = null;
+      this.onGuideSwap?.();
+    }
     this.cascade = 0;
     sfx.swap();
     a.state = b.state = 'swap';
@@ -662,7 +677,7 @@ export class Board extends Container {
     if (this.isStable()) {
       this.idleTime += dt;
       if (!this.shuffling && !this.hasMoves()) this.shuffle();
-      else if (this.idleTime > 5 && this.inputEnabled && this.hintTiles.length === 0) this.showHint();
+      else if (this.idleTime > 5 && this.inputEnabled && this.hintTiles.length === 0 && !this.guide) this.showHint();
     } else {
       this.idleTime = 0;
     }

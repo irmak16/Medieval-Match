@@ -1,17 +1,20 @@
 import { Container, Graphics, NineSliceSprite, Point, Sprite, Text } from 'pixi.js';
-import { Board, Kind, BoosterKind } from '../game/board';
+import { Board, Kind, BoosterKind, Tile } from '../game/board';
 import { trackQuest, addRoadPoints, streakBonus, addCupPoints, loseLife, piggyAdd, raceWin, raceState, RACE_TARGET } from '../liveops';
 import { addPacks } from '../album';
 import { Pip, hasPip } from '../mascot';
 import { FX } from '../fx';
 import { getLevel, GoalType, LevelDef } from '../levels';
-import { tex, hasTex, texOr, iceTex, cauldronTex, beltTex } from '../assets';
+import { tex, hasTex, texOr, iceTex, cauldronTex, beltTex, handTex, HAND_TIP } from '../assets';
 const gtex = (n: string) => (n === '__ice' ? iceTex(2) : n === '__cauldron' ? cauldronTex(2) : n === '__belt' ? beltTex() : tex(n));
 import { label, woodPanel, Button, iconButton, overlay } from '../ui';
 import { tween, Ease, wait, clearTimers, after, killTweens, fadeUpAndDestroy } from '../tween';
 import { sfx, updateMusic, setMusicIntensity } from '../audio';
 import { getSave, save, DEV, firstTime } from '../storage';
+import { unlocked } from '../unlocks';
 import type { App } from '../main';
+
+const SHOP_FROM = 4; // pre-level booster shop appears from this level on
 
 const GOAL_TEX: Record<GoalType, string> = {
   red: 'tile_red', blue: 'tile_blue', green: 'tile_green', yellow: 'tile_yellow', purple: 'tile_purple',
@@ -27,6 +30,10 @@ const BOOSTERS: { k: BoosterKind; tex: string; fallback: string; rot: number; na
 
 export const DIFF_COLOR = { normal: 0x2c5f9e, hard: 0xa01e1e, superhard: 0x6a1fa0 } as const;
 
+interface GuideUI {
+  layer: Container; hand: Sprite; rings: Graphics[]; hudLayer: Container | null;
+  a: Tile; b: Tile; t: number; hudT: number; done: (ok: boolean) => void;
+}
 interface GoalUI { type: GoalType; left: number; shown: number; icon: Sprite; base: number; txt: Text; tick: Graphics; node: Container }
 
 export class GameScene extends Container {
@@ -56,6 +63,7 @@ export class GameScene extends Container {
   private uiFxAdd = new Container();
   private pips: Pip[] = [];
   private scaredShown = false;
+  private guide: GuideUI | null = null;
 
   constructor(private app: App, public levelNo: number, public W: number, public H: number) {
     super();
@@ -229,6 +237,8 @@ export class GameScene extends Container {
       if (this.state === 'play') this.board.inputEnabled = true;
       const all = [...boosters, ...streakBonus()];
       if (all.length) this.board.addStartBoosters(all);
+      // level 1 is taught by a guided first move (the key is the old "Nasıl Oynanır?" tip, so nobody sees it twice)
+      if (this.levelNo === 1 && firstTime('tip_match')) void this.runTutorial();
       return;
     }
     const banner = new Container();
@@ -294,12 +304,21 @@ export class GameScene extends Container {
         c.position.set(ic.x + 28, y + 30);
         panel.addChild(ic, c);
       });
-      y += ph * 0.13;
+      const shop = this.levelNo >= SHOP_FROM; // a brand-new player has nothing to decide before the first levels
+      const shopTip = shop && firstTime('tip_prebooster');
+      y += ph * (shopTip ? 0.105 : 0.13);
       const bl = label('Güçlendiriciler', 30, { fill: 0x5a2e0e, stroke: 0xfff2d0, strokeW: 4, shadow: false });
       bl.y = y;
       bl.x = -60;
       const coinY = y;
-      panel.addChild(bl);
+      if (shop) panel.addChild(bl);
+      if (shopTip) {
+        const tp = label('Yeni! Oyuna güçlendiriciyle başlayabilirsin.', 22, { fill: 0x2f7a1a, stroke: 0xfff2d0, strokeW: 4, shadow: false });
+        if (tp.width > 500) tp.scale.set(500 / tp.width);
+        tp.y = y + ph * 0.043;
+        panel.addChild(tp);
+        y += ph * 0.022;
+      }
       y += ph * 0.11;
       const s = getSave();
       const coinTxt = label(String(s.coins), 28, { fill: 0xffe066 });
@@ -310,7 +329,7 @@ export class GameScene extends Container {
       ];
       const chosen = new Set<number>();
       const spent = () => [...chosen].reduce((a, i) => a + opts[i].cost, 0);
-      opts.forEach((o, i) => {
+      (shop ? opts : []).forEach((o, i) => {
         const slot = new Container();
         slot.position.set((i - 1) * 140, y);
         const bg = new Graphics().roundRect(-55, -55, 110, 110, 24).fill({ color: 0x3b2210, alpha: 0.85 }).stroke({ width: 4, color: 0xc89a3c });
@@ -354,11 +373,11 @@ export class GameScene extends Container {
       coinTxt.x = 22;
       coinRow.addChild(ci, coinTxt);
       coinRow.position.set(150, coinY);
-      panel.addChild(coinRow);
+      if (shop) panel.addChild(coinRow);
       const sb = streakBonus();
       if (sb.length) {
         const st = label(`Seri bonusu (${getSave().streak} galibiyet): +${sb.length} hediye güçlendirici!`, 22, { fill: 0x2f7a1a, stroke: 0xfff2d0, strokeW: 4, shadow: false });
-        st.y = y + ph * 0.115;
+        st.y = shop ? y + ph * 0.115 : y - ph * 0.06;
         panel.addChild(st);
       }
       const play = new Button('green', 280, 'Oyna', () => {
@@ -368,7 +387,7 @@ export class GameScene extends Container {
         root.destroy({ children: true });
         resolve(kinds);
       }, 44);
-      play.y = ph * 0.355;
+      play.y = shop ? ph * 0.355 : ph * 0.25;
       panel.addChild(play);
       const pw = (panel.children[0] as Sprite).width;
       const close = new Button('red', 80, 'X', () => this.app.showMenu(), 34);
@@ -377,10 +396,141 @@ export class GameScene extends Container {
     });
   }
 
+  // ------------------------------------------------------------------ level 1 tutorial (guided first moves)
+  private alive(): boolean {
+    return !this.destroyed && this.state === 'play';
+  }
+
+  private async untilStable(max = 8): Promise<boolean> {
+    for (let i = 0; i < max * 10; i++) {
+      if (!this.alive()) return false;
+      if (this.board.isStable()) return true;
+      await wait(0.1, 'ui');
+    }
+    return false;
+  }
+
+  /** Two guided moves, then the player is released. Any surprise (no move found, board changed) ends the guide. */
+  private async runTutorial() {
+    const steps = [
+      { text: 'Taşı kaydır, 3\'lü yap!', hud: false },
+      { text: 'Hedefleri hamlelerin bitmeden topla!', hud: true },
+    ];
+    for (const st of steps) {
+      if (!(await this.untilStable())) return;
+      await wait(0.35, 'ui');
+      if (!(await this.untilStable())) return;
+      const m = this.board.findMove();
+      if (!m || !this.alive()) return;
+      const before = this.moves;
+      if (!(await this.guideMove(m[0], m[1], st.text, st.hud))) return;
+      if (!(await this.untilStable(12))) return;
+      if (this.moves >= before) return;
+    }
+  }
+
+  private guideMove(a: Tile, b: Tile, text: string, hud: boolean): Promise<boolean> {
+    return new Promise((resolve) => {
+      const bd = this.board, S = bd.S;
+      const layer = new Container();
+      layer.position.copyFrom(bd.position);
+      layer.eventMode = 'none';
+      const dim = new Graphics().rect(-8, -8, bd.W * S + 16, bd.H * S + 16).fill({ color: 0x0d0703, alpha: 0.62 });
+      for (const t of [a, b]) dim.roundRect(t.c * S + 2, t.r * S + 2, S - 4, S - 4, S * 0.2).cut();
+      layer.addChild(dim);
+      const rings = [a, b].map((t) => {
+        const g = new Graphics().roundRect(t.c * S + 2, t.r * S + 2, S - 4, S - 4, S * 0.2).stroke({ width: 5, color: 0xffe066 });
+        layer.addChild(g);
+        return g;
+      });
+      const hand = new Sprite(handTex());
+      hand.anchor.set(HAND_TIP.x / 160, HAND_TIP.y / 160);
+      hand.scale.set((S * 1.5) / 160);
+      layer.addChild(hand);
+      const cap = new Container();
+      const ct = label(text, 32, { fill: 0xffe39a });
+      const cw = Math.min(this.W - 30, ct.width + 60);
+      if (ct.width > cw - 40) ct.scale.set((cw - 40) / ct.width);
+      cap.addChild(new Graphics().roundRect(-cw / 2, -27, cw, 54, 27).fill({ color: 0x2a1408, alpha: 0.92 }).stroke({ width: 4, color: 0xd9a53c }), ct);
+      cap.position.set((bd.W * S) / 2, -44);
+      layer.addChild(cap);
+      this.playfield.addChild(layer);
+      let hudLayer: Container | null = null;
+      if (hud) {
+        hudLayer = new Container();
+        hudLayer.eventMode = 'none';
+        for (const g of this.goals) {
+          const r = new Graphics().roundRect(-56, -62, 112, 124, 20).stroke({ width: 5, color: 0xffe066 });
+          r.position.copyFrom(g.node.position);
+          hudLayer.addChild(r);
+        }
+        const mr = new Graphics().roundRect(-82, -66, 164, 132, 24).stroke({ width: 5, color: 0xffe066 });
+        mr.position.copyFrom(this.movesNode.position);
+        hudLayer.addChild(mr);
+        this.addChild(hudLayer);
+      }
+      this.guide = { layer, hand, rings, hudLayer, a, b, t: 0, hudT: 0, done: resolve };
+      bd.guide = { r1: a.r, c1: a.c, r2: b.r, c2: b.c };
+      bd.onGuideSwap = () => this.endGuide(true);
+    });
+  }
+
+  private endGuide(ok: boolean) {
+    const g = this.guide;
+    if (!g) return;
+    this.guide = null;
+    this.board.guide = null;
+    this.board.onGuideSwap = null;
+    for (const n of [g.layer, g.hudLayer]) {
+      if (!n) continue;
+      tween(n, { alpha: 0 }, 0.2).then(() => n.destroy({ children: true }));
+    }
+    g.done(ok);
+  }
+
+  private updateGuide(dt: number) {
+    const g = this.guide;
+    if (!g) return;
+    const bd = this.board;
+    // the board changed under the guide (or the level ended): let the player play
+    const same = (t: Tile) => !t.view.destroyed && t.state === 'idle' && bd.grid[t.r]?.[t.c]?.tile === t;
+    if (!this.alive() || !bd.inputEnabled || !same(g.a) || !same(g.b)) {
+      this.endGuide(false);
+      return;
+    }
+    g.t += dt;
+    const S = bd.S;
+    const P = 1.9, p = g.t % P;
+    const ax = (g.a.c + 0.5) * S, ay = (g.a.r + 0.5) * S, bx = (g.b.c + 0.5) * S, by = (g.b.r + 0.5) * S;
+    let k = 0, a = 1, sc = 1;
+    if (p < 0.3) {
+      a = p / 0.3;
+      sc = 1.15 - 0.15 * a;
+    } else if (p < 1.2) {
+      const u = (p - 0.3) / 0.9;
+      k = u * u * (3 - 2 * u);
+      sc = 0.9;
+    } else if (p < 1.6) {
+      k = 1;
+      sc = 0.9 + 0.1 * ((p - 1.2) / 0.4);
+    } else {
+      k = 1;
+      a = 1 - (p - 1.6) / 0.3;
+    }
+    g.hand.position.set(ax + (bx - ax) * k, ay + (by - ay) * k);
+    g.hand.alpha = Math.max(0, Math.min(1, a));
+    g.hand.scale.set(((S * 1.5) / 160) * sc);
+    const pulse = 0.55 + 0.45 * Math.sin(g.t * 6);
+    for (const r of g.rings) r.alpha = pulse;
+    if (g.hudLayer) {
+      g.hudT += dt;
+      g.hudLayer.alpha = g.hudT > 6 ? Math.max(0, 1 - (g.hudT - 6) * 3) * pulse : pulse;
+    }
+  }
+
   /** One-time explanation when a level introduces a new mechanic. */
   private mechanicTip(): Promise<void> {
     const tips: Record<number, { key: string; title: string; icons: string[]; text: string }> = {
-      1: { key: 'tip_match', title: 'Nasıl Oynanır?', icons: ['tile_red', 'tile_red', 'tile_red'], text: 'Taşları kaydırarak aynı renkten\n3 veya daha fazlasını yan yana getir.\nHedefleri hamlelerin bitmeden topla!' },
       3: { key: 'tip_crate', title: 'Yeni: Tahta Sandık', icons: ['ob_crate1', 'ob_crate2'], text: 'Sandığın yanında eşleşme yap\nya da bir güçlendiriciyle vur.\nÇatlak sandık tek vuruşta kırılır.' },
       6: { key: 'tip_chain', title: 'Yeni: Zincir', icons: ['ob_chain'], text: 'Zincirli taş yer değiştiremez.\nOnu da içeren bir eşleşme yap\nya da güçlendiriciyle zinciri kır.' },
       7: { key: 'tip_stone', title: 'Yeni: Taş Blok', icons: ['ob_stone1', 'ob_stone2'], text: 'Taş bloklar sağlamdır,\nkırılmak için birkaç vuruş ister.' },
@@ -514,7 +664,7 @@ export class GameScene extends Container {
   }
 
   private tapBooster(k: BoosterKind) {
-    if (this.state !== 'play' || !this.board.inputEnabled) return;
+    if (this.state !== 'play' || !this.board.inputEnabled || this.guide) return;
     sfx.click();
     const info = BOOSTERS.find((b) => b.k === k)!;
     const s = getSave();
@@ -618,6 +768,7 @@ export class GameScene extends Container {
       if (this.hitStop <= 0) this.timeScale = this.baseScale;
     }
     this.board.update(dt * this.timeScale);
+    this.updateGuide(dt);
     this.uiFx.update(dt);
     for (const p of this.pips) if (!p.destroyed) p.update(dt);
     if (this.comboTimer > 0) {
@@ -781,9 +932,10 @@ export class GameScene extends Container {
       this.uiFx.sparkleBurst(l.x, l.y, 18, 0xffe070, 5);
     }, 'ui');
     const extras: string[] = [];
-    if (gotPack) extras.push('+1 kart paketi!');
-    if (piggy > 0) extras.push(`Kumbara +${piggy}`);
-    if (race >= 0) extras.push(`Yarış ${race}/${RACE_TARGET}`);
+    // rewards of still-locked features pile up silently
+    if (gotPack && unlocked('album')) extras.push('+1 kart paketi!');
+    if (piggy > 0 && unlocked('piggy')) extras.push(`Kumbara +${piggy}`);
+    if (race >= 0 && unlocked('race')) extras.push(`Yarış ${race}/${RACE_TARGET}`);
     if (extras.length) {
       const pk = label(extras.join('  ·  '), 24, { fill: 0x2f7a1a, stroke: 0xfff2d0, strokeW: 4, shadow: false });
       pk.y = ph * 0.222;
