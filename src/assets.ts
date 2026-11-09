@@ -264,6 +264,134 @@ function canvasTex(draw: (g: CanvasRenderingContext2D) => void, size = 128): Tex
   return Texture.from(c);
 }
 
+function rr(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.arcTo(x + w, y, x + w, y + h, r);
+  g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r);
+  g.arcTo(x, y, x + w, y, r);
+  g.closePath();
+}
+
+/** Little house (home tab of the menu bar). */
+let home: Texture | null = null;
+export function homeTex(): Texture {
+  if (home) return home;
+  home = canvasTex((g) => {
+    g.lineJoin = 'round';
+    g.lineWidth = 6;
+    g.strokeStyle = '#4a1e05';
+    g.fillStyle = '#f3dfb0';
+    rr(g, 26, 56, 76, 58, 6);
+    g.fill();
+    g.stroke();
+    g.fillStyle = '#c93a2a';
+    g.beginPath();
+    g.moveTo(14, 62);
+    g.lineTo(64, 16);
+    g.lineTo(114, 62);
+    g.closePath();
+    g.fill();
+    g.stroke();
+    g.fillStyle = '#7a4a22';
+    rr(g, 52, 74, 24, 40, 12);
+    g.fill();
+    g.stroke();
+    g.fillStyle = '#ffd23a';
+    g.beginPath();
+    g.arc(70, 96, 3, 0, Math.PI * 2);
+    g.fill();
+  });
+  return home;
+}
+
+/** Rolled-out parchment map with a dotted path (map tab of the menu bar). */
+let map: Texture | null = null;
+export function mapTex(): Texture {
+  if (map) return map;
+  map = canvasTex((g) => {
+    g.lineJoin = 'round';
+    g.lineWidth = 6;
+    g.strokeStyle = '#4a1e05';
+    g.fillStyle = '#f3dfb0';
+    rr(g, 18, 22, 92, 84, 8);
+    g.fill();
+    g.stroke();
+    g.fillStyle = '#d9b46a';
+    rr(g, 12, 16, 104, 16, 8);
+    g.fill();
+    g.stroke();
+    rr(g, 12, 96, 104, 16, 8);
+    g.fill();
+    g.stroke();
+    g.strokeStyle = '#8e1d1d';
+    g.lineWidth = 5;
+    g.setLineDash([2, 10]);
+    g.lineCap = 'round';
+    g.beginPath();
+    g.moveTo(36, 88);
+    g.quadraticCurveTo(60, 52, 66, 72);
+    g.quadraticCurveTo(76, 90, 92, 48);
+    g.stroke();
+    g.setLineDash([]);
+    g.strokeStyle = '#c93a2a';
+    g.lineWidth = 7;
+    g.beginPath();
+    g.moveTo(86, 40);
+    g.lineTo(98, 54);
+    g.moveTo(98, 40);
+    g.lineTo(86, 54);
+    g.stroke();
+  });
+  return map;
+}
+
+/** Pointing hand for the tutorial. The fingertip is at (HAND_TIP.x, HAND_TIP.y) of the 160px texture. */
+export const HAND_TIP = { x: 68, y: 8 };
+let hand: Texture | null = null;
+export function handTex(): Texture {
+  if (hand) return hand;
+  hand = canvasTex((g) => {
+    g.lineJoin = 'round';
+    g.lineWidth = 6;
+    g.strokeStyle = '#4a1e05';
+    const skin = '#ffe9cf';
+    const part = (x: number, y: number, w: number, h: number, r: number, fill = skin) => {
+      g.fillStyle = fill;
+      rr(g, x, y, w, h, r);
+      g.fill();
+      g.stroke();
+    };
+    part(112, 76, 22, 44, 11); // pinky
+    part(94, 62, 24, 58, 12); // ring
+    part(78, 52, 24, 68, 12); // middle
+    part(54, 8, 28, 112, 14); // index finger, pointing up
+    part(46, 96, 92, 46, 20); // palm
+    // thumb
+    g.save();
+    g.translate(44, 106);
+    g.rotate(-0.45);
+    g.fillStyle = skin;
+    g.beginPath();
+    g.ellipse(0, 0, 14, 24, 0, 0, Math.PI * 2);
+    g.fill();
+    g.stroke();
+    g.restore();
+    part(50, 138, 84, 20, 6, '#2c5f9e'); // cuff
+    // finger creases
+    g.lineWidth = 3;
+    g.lineCap = 'round';
+    g.beginPath();
+    g.moveTo(90, 100);
+    g.lineTo(90, 118);
+    g.moveTo(108, 100);
+    g.lineTo(108, 118);
+    g.stroke();
+  }, 160);
+  return hand;
+}
+
 /** Clay coin jar for the piggy bank (k = how full, 0..1). */
 const jarCache: Record<number, Texture> = {};
 export function jarTex(k = 1): Texture {

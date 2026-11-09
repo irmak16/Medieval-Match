@@ -23,6 +23,8 @@ export interface SaveData {
   gfx: 'auto' | 'low' | 'high';
   symbols: boolean; // colour-blind helper shapes on tiles
   homeHint: boolean; // the "add to home screen / backup code" hint was dismissed
+  unlocks: string[]; // feature-unlock popups already shown
+  unlocksInit: boolean; // old saves have had their already-unlocked features marked as shown
 }
 
 export interface Stats {
@@ -51,6 +53,8 @@ const DEFAULTS: SaveData = {
   gfx: 'auto',
   symbols: false,
   homeHint: false,
+  unlocks: [],
+  unlocksInit: false,
 };
 
 let data: SaveData = structuredClone(DEFAULTS);
