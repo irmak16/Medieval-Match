@@ -1036,8 +1036,9 @@ export class GameScene extends Container {
       panel.addChild(minus);
     }
     const lines = [free ? 'Sınırsız canın var,\ncan kaybetmezsin.' : 'Pes edersen 1 can kaybedersin.'];
-    if (s.streak > 0) lines.push(`${s.streak} galibiyetlik serin de sıfırlanır!`);
+    if (s.streak > 0) lines.push(free ? `Ama ${s.streak} galibiyetlik serin sıfırlanır!` : `${s.streak} galibiyetlik serin de sıfırlanır!`);
     const t = label(lines.join('\n'), 27, ink);
+    if (t.width > 500) t.scale.set(500 / t.width);
     t.style.lineHeight = 38;
     t.y = -ph * 0.02;
     panel.addChild(t);

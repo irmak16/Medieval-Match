@@ -388,6 +388,7 @@ export function chestPanel(parent: Container, W: number, H: number, onChange: ()
       panel.addChildAt(glow, 1);
       t.text = r ? rewardText(r) : '';
       t.style.fontSize = 28;
+      t.scale.set(Math.min(1, (pw * 0.78) / t.width));
       b.visible = false;
       after(1.8, () => {
         if (root.destroyed) return;
@@ -515,7 +516,7 @@ export function statsPanel(parent: Container, W: number, H: number) {
   if (list.width > pw * 0.8) list.scale.set((pw * 0.8) / list.width);
   panel.addChild(list);
   // copy the per-level play data for the developer
-  const cp = new Button('green', 400, 'Zorluk Verisini Kopyala', () => {
+  const cp = new Button('green', 400, 'Veriyi Kopyala', () => {
     const text = telemetryText();
     try {
       navigator.clipboard?.writeText(text);
@@ -523,8 +524,8 @@ export function statsPanel(parent: Container, W: number, H: number) {
       /* ignore */
     }
     window.prompt('Zorluk verisi (kopyalandı). Geliştiriciye yapıştır:', text);
-  }, 27);
+  }, 30);
   cp.setBaseScale(0.75);
-  cp.y = ph * 0.315;
+  cp.y = ph * 0.325;
   panel.addChild(cp);
 }
