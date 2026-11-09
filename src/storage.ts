@@ -22,6 +22,7 @@ export interface SaveData {
   stats: Stats;
   gfx: 'auto' | 'low' | 'high';
   symbols: boolean; // colour-blind helper shapes on tiles
+  homeHint: boolean; // the "add to home screen / backup code" hint was dismissed
 }
 
 export interface Stats {
@@ -31,6 +32,7 @@ export interface Stats {
 }
 
 const KEY = 'medieval-match-save-v1';
+const BACKUP_KEY = 'medieval-match-save-v1-bak'; // the previous good save
 const DEFAULTS: SaveData = {
   level: 1, stars: 0, coins: 300, sound: true, music: true, seen: [], best: 0, streak: 0,
   inv: { hammer: 2, row: 1, col: 1, shuffle: 1 },
@@ -48,25 +50,69 @@ const DEFAULTS: SaveData = {
   stats: { wins: 0, losses: 0, starsEarned: 0, bestStreak: 0, bestCombo: 0, counts: {}, fails: {} },
   gfx: 'auto',
   symbols: false,
+  homeHint: false,
 };
 
 let data: SaveData = structuredClone(DEFAULTS);
 /** Set when the page was opened with ?level=N (testing): tutorials and start popups are skipped. */
 export const DEV = { on: false };
 
-export function loadSave(): SaveData {
+const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === 'object' && !Array.isArray(v);
+
+/** Fills in anything missing or of the wrong type from the defaults, recursively (unknown keys are kept). */
+function mergeDefaults(def: any, v: any): any {
+  const out: any = isObj(v) ? { ...v } : {};
+  for (const k of Object.keys(def)) {
+    const d = def[k];
+    if (Array.isArray(d)) {
+      if (!Array.isArray(out[k])) out[k] = structuredClone(d);
+    } else if (isObj(d)) out[k] = mergeDefaults(d, out[k]);
+    else if (d === null) {
+      if (!isObj(out[k])) out[k] = null;
+    } else if (typeof out[k] !== typeof d || (typeof d === 'number' && !Number.isFinite(out[k]))) out[k] = d;
+  }
+  return out;
+}
+
+/** Turns whatever was stored (or imported) into a complete, valid save. */
+function normalize(parsed: unknown): SaveData {
+  const d: SaveData = mergeDefaults(DEFAULTS, parsed);
+  if (!['auto', 'low', 'high'].includes(d.gfx)) d.gfx = 'auto';
+  if (d.race && ![d.race.start, d.race.wins, d.race.done, d.race.seed].every((n) => Number.isFinite(n))) d.race = null;
+  d.level = Math.max(1, Math.floor(d.level));
+  d.best = Math.max(d.best ?? 0, d.level - 1);
+  // older saves: count already finished levels as earned stars
+  if (!d.stats.starsEarned && d.best > 0) d.stats.starsEarned = d.best;
+  return d;
+}
+
+function readSlot(key: string): { raw: string; save: SaveData } | null {
   try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) data = { ...structuredClone(DEFAULTS), ...JSON.parse(raw) };
-    else data = structuredClone(DEFAULTS);
-    data.inv = { ...DEFAULTS.inv, ...data.inv };
-    data.album = { ...structuredClone(DEFAULTS.album), ...data.album };
-    data.lives = { ...DEFAULTS.lives, ...data.lives };
-    data.stats = { ...structuredClone(DEFAULTS.stats), ...data.stats };
-    if (!Array.isArray(data.seen)) data.seen = [];
-    data.best = Math.max(data.best ?? 0, data.level - 1);
-    // older saves: count already finished levels as earned stars
-    if (!data.stats.starsEarned && data.best > 0) data.stats.starsEarned = data.best;
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!isObj(parsed)) return null;
+    return { raw, save: normalize(parsed) };
+  } catch {
+    return null;
+  }
+}
+
+let lastGoodRaw: string | null = null; // what the main key held after the last successful load/save
+
+export function loadSave(): SaveData {
+  data = structuredClone(DEFAULTS);
+  try {
+    // main key first; if it is missing or unreadable (e.g. evicted/corrupted), fall back to the backup
+    let slot = readSlot(KEY);
+    if (!slot) {
+      slot = readSlot(BACKUP_KEY);
+      if (slot) localStorage.setItem(KEY, slot.raw);
+    }
+    if (slot) {
+      data = slot.save;
+      lastGoodRaw = slot.raw;
+    }
   } catch {
     /* storage unavailable: play without saving */
   }
@@ -85,10 +131,32 @@ export function loadSave(): SaveData {
 
 export function save(): void {
   try {
-    localStorage.setItem(KEY, JSON.stringify(data));
+    const raw = JSON.stringify(data);
+    // keep the previous good save as a rolling backup before overwriting it
+    if (lastGoodRaw && lastGoodRaw !== raw) {
+      try {
+        localStorage.setItem(BACKUP_KEY, lastGoodRaw);
+      } catch {
+        /* ignore */
+      }
+    }
+    localStorage.setItem(KEY, raw);
+    lastGoodRaw = raw;
   } catch {
     /* ignore */
   }
+}
+
+/** Asks the browser not to evict our storage; called once, after the first user interaction. */
+export function requestPersistentStorage(): void {
+  const ask = () => {
+    try {
+      navigator.storage?.persist?.()?.catch(() => {});
+    } catch {
+      /* ignore */
+    }
+  };
+  window.addEventListener('pointerdown', ask, { once: true });
 }
 
 export function getSave(): SaveData {
@@ -114,8 +182,8 @@ export function importCode(code: string): boolean {
     const c = code.trim();
     if (!c.startsWith('MM1-')) return false;
     const parsed = JSON.parse(decodeURIComponent(escape(atob(c.slice(4)))));
-    if (typeof parsed.level !== 'number') return false;
-    data = { ...structuredClone(DEFAULTS), ...parsed };
+    if (!isObj(parsed) || typeof parsed.level !== 'number' || !Number.isFinite(parsed.level)) return false;
+    data = normalize(parsed);
     save();
     return true;
   } catch {

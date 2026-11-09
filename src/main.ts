@@ -6,7 +6,7 @@ import { tween, Ease } from './tween';
 import { loadAssets, loadOptional, tex } from './assets';
 import { LOW_END } from './fx';
 import { updateTweens } from './tween';
-import { loadSave } from './storage';
+import { loadSave, requestPersistentStorage } from './storage';
 import { unlockAudio, loadRecordedAudio } from './audio';
 import { MenuScene } from './scenes/menu';
 import { GameScene } from './scenes/game';
@@ -38,6 +38,7 @@ export class App {
     });
     document.getElementById('app')!.appendChild(this.pixi.canvas);
     loadSave();
+    requestPersistentStorage();
     try {
       await Promise.all([
         document.fonts.load('40px "Titan One"'),
@@ -160,6 +161,31 @@ export class App {
   }
 }
 
+/** Full-screen "rotate your phone" notice for short landscape windows (the game is portrait only). */
+function setupRotateOverlay() {
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed;inset:0;z-index:100;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;'
+    + 'background:radial-gradient(circle at 50% 40%,#6b3a1c 0%,#2b1a10 75%);color:#ffe39a;text-align:center;touch-action:none;'
+    + 'font:400 26px "Titan One","Baloo 2",system-ui,sans-serif;text-shadow:0 2px 0 #4a1e05;';
+  el.innerHTML = '<svg width="120" height="120" viewBox="0 0 120 120" fill="none" stroke="#ffd84a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">'
+    + '<g transform="rotate(-90 60 60)"><rect x="38" y="16" width="44" height="80" rx="8"/><line x1="54" y1="86" x2="66" y2="86"/></g>'
+    + '<path d="M22 30 A44 44 0 0 1 78 18"/><path d="M70 8 L80 18 L68 25"/>'
+    + '<path d="M98 90 A44 44 0 0 1 42 102"/><path d="M50 112 L40 102 L52 95"/></svg>'
+    + '<div>Lütfen telefonunu dik tut</div>';
+  for (const ev of ['pointerdown', 'pointerup', 'touchstart', 'touchmove', 'click', 'wheel']) {
+    el.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); }, { passive: false });
+  }
+  document.body.appendChild(el);
+  const update = () => {
+    const w = window.innerWidth, h = window.innerHeight;
+    el.style.display = h < 480 && w > h ? 'flex' : 'none';
+  };
+  window.addEventListener('resize', update);
+  window.addEventListener('orientationchange', update);
+  update();
+}
+
+setupRotateOverlay();
 new App().start();
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {

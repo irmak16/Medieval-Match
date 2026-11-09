@@ -18,6 +18,15 @@ import { nextTaskCost } from './castle';
 
 let dailyShownThisSession = false;
 
+/** True when the game runs as an installed app (home-screen / standalone display mode). */
+function isInstalled(): boolean {
+  try {
+    return ['standalone', 'fullscreen', 'minimal-ui'].some((m) => window.matchMedia(`(display-mode: ${m})`).matches) || (navigator as any).standalone === true;
+  } catch {
+    return false;
+  }
+}
+
 export class MenuScene extends Container {
   private floaters: { s: Container; base: number; ph: number; amp: number }[] = [];
   private t = 0;
@@ -60,6 +69,8 @@ export class MenuScene extends Container {
     t1.position.set(W / 2, H * 0.29);
     const t2 = label('Match', 124, { fill: 0xffffff, stroke: 0x8e1d1d, strokeW: 18 });
     t2.position.set(W / 2, H * 0.29 + 108);
+    // keep the title clear of the side buttons and their labels
+    for (const t of [t1, t2]) if (t.width > W - 280) t.scale.set((W - 280) / t.width);
     this.addChild(t1, t2);
 
     this.falcon = new Sprite(tex('pw_falcon'));
@@ -178,7 +189,24 @@ export class MenuScene extends Container {
     if (!dailyShownThisSession && dailyAvailable() && !DEV.on) {
       dailyShownThisSession = true;
       dailyPanel(this, W, H, () => this.refreshBadges());
+    } else if (s.best >= 5 && !s.homeHint && !DEV.on && !isInstalled()) {
+      this.homeHintPanel();
     }
+  }
+
+  /** One-time hint: browsers can wipe site data, so suggest installing the game and making a backup code. */
+  private homeHintPanel() {
+    const { panel, ph, close } = popup(this, this.W, this.H, 'İlerlemeni Koru', () => {
+      getSave().homeHint = true;
+      save();
+    });
+    const ink = { fill: 0x5a2e0e, stroke: 0xfff2d0, strokeW: 4, shadow: false } as const;
+    const t = label('İlerlemen bu tarayıcıda\nsaklanıyor ve silinebilir.\nOyunu ana ekrana ekle,\nilerlemen korunsun.\n\nYedek için:\nAyarlar > "Kayıt Kodu Al"', 28, ink);
+    t.y = -ph * 0.04;
+    panel.addChild(t);
+    const b = new Button('green', 260, 'Tamam', close, 38);
+    b.y = ph * 0.33;
+    panel.addChild(b);
   }
 
   private play() {
@@ -234,6 +262,7 @@ export class MenuScene extends Container {
     b.position.set(x, y);
     const t = label(text, 21);
     t.position.set(x, y + 60);
+    if (t.width > 124) t.scale.set(124 / t.width); // never clipped by the screen edge or the title
     const badge = new Container();
     badge.addChild(new Graphics().circle(0, 0, 17).fill({ color: 0xd62020 }).stroke({ width: 3, color: 0xffffff }));
     badge.addChild(label('!', 22));
